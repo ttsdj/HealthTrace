@@ -1,0 +1,102 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+*.egg-info/
+
+# Virtual environments
+.venv
+.env
+
+# Environment files (belt-and-suspenders)
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# Python
+.pytest_cache/
+*.pyc
+*.ipynb
+
+# Docker files
+volumes/
+
+# OS files
+.DS_Store
+
+# Local data, uploads, model caches and evaluation artifacts.
+data/
+logs/
+ablation_results/
+.worktrees/
+
+# Documentation (internal interview materials)
+docs/
+*.docx
+presentation.html
+project_visualization.html
+
+# Logs
+*.log
+
+# Accidental duplicate compatibility copies; canonical files live in backend/chat, backend/tools, backend/indexing.
+backend/rag/service.py
+backend/rag/runtime.py
+backend/rag/rag_context.py
+backend/rag/knowledge.py
+backend/rag/structure_parser.py
+
+# Node / Frontend development
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Vite local cache
+.vite/
+frontend/.vite/
+
+# AI / ML artifacts
+venv/
+env/
+ENV/
+.cache/
+cache/
+tmp/
+temp/
+output/
+outputs/
+runs/
+results/
+wandb/
+mlruns/
+checkpoint/
+checkpoints/
+ckpt/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.onnx
+*.h5
+*.pb
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.faiss
+*.index
+*.sqlite
+*.sqlite3
+*.db
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z

@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+.venv
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Environment
+.env
+.env.*
+
+# Node
+node_modules/
+
+# Docker volumes
+volumes/
+
+# Logs
+*.log
+
+# Internal docs, local data and generated reports
+docs/
+data/
+ablation_results/
+*.docx
+presentation.html
+project_visualization.html
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend build output
+frontend/dist/
