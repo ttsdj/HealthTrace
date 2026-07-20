@@ -1,4 +1,4 @@
-"""Import MedRAG/textbooks corpus into an isolated Milvus collection."""
+"""Import a MedRAG corpus into an isolated Milvus collection."""
 from __future__ import annotations
 
 import argparse
@@ -23,9 +23,9 @@ from backend.indexing.embedding import embedding_service  # noqa: E402
 from backend.indexing.milvus_client import MilvusStore  # noqa: E402
 from backend.indexing.milvus_writer import MilvusWriter  # noqa: E402
 
-DATASET_ID = "MedRAG/textbooks"
+DEFAULT_DATASET_ID = "MedRAG/textbooks"
 DEFAULT_COLLECTION = "med_mirage_textbooks_v1"
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "medrag" / "textbooks"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "medrag"
 
 
 def _hash_id(*parts: str, length: int = 20) -> str:
@@ -52,13 +52,23 @@ def _split_text(text: str, *, max_chars: int, overlap: int) -> list[str]:
     return chunks
 
 
-def stream_textbook_rows(*, split: str = "train") -> Iterable[dict]:
-    yield from load_dataset(DATASET_ID, split=split, streaming=True)
+def stream_corpus_rows(
+    *,
+    dataset_id: str,
+    split: str = "train",
+    shuffle_buffer: int = 0,
+    seed: int = 20260720,
+) -> Iterable[dict]:
+    dataset = load_dataset(dataset_id, split=split, streaming=True)
+    if shuffle_buffer > 0:
+        dataset = dataset.shuffle(buffer_size=shuffle_buffer, seed=seed)
+    yield from dataset
 
 
 def build_docs(
     rows: Iterable[dict],
     *,
+    dataset_id: str,
     max_rows: int = 0,
     max_chars: int = 1200,
     overlap: int = 120,
@@ -67,22 +77,23 @@ def build_docs(
     for row_index, row in enumerate(rows, 1):
         if max_rows and row_index > max_rows:
             break
+        safe_dataset = dataset_id.replace("/", "_").replace("\\", "_")
         source_id = sanitize_text(str(row.get("id") or f"row-{row_index}"))
-        title = sanitize_text(str(row.get("title") or "MedRAG textbook"))
+        title = sanitize_text(str(row.get("title") or dataset_id))
         content = sanitize_text(str(row.get("contents") or row.get("content") or ""))
         if not content:
             continue
         for chunk_index, chunk in enumerate(
             _split_text(content, max_chars=max_chars, overlap=overlap)
         ):
-            chunk_id = f"medrag-textbooks::{source_id}::{chunk_index}"
-            root_id = f"medrag-textbooks::{source_id}"
+            chunk_id = f"{safe_dataset}::{source_id}::{chunk_index}"
+            root_id = f"{safe_dataset}::{source_id}"
             docs.append(
                 {
                     "text": chunk,
                     "filename": title[:255],
                     "file_type": "MedRAGTextbook",
-                    "file_path": DATASET_ID,
+                    "file_path": dataset_id,
                     "page_number": 0,
                     "chunk_idx": chunk_index,
                     "chunk_id": chunk_id,
@@ -92,7 +103,7 @@ def build_docs(
                     "chunk_kind": "textbook_chunk",
                     "structure_type": "textbook_passage",
                     "section_path": title,
-                    "source_dataset": DATASET_ID,
+                    "source_dataset": dataset_id,
                     "source_record_id": source_id,
                     "source_hash": _hash_id(source_id, chunk),
                 }
@@ -110,32 +121,46 @@ def _write_manifest(output_dir: Path, manifest: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset-id", default=DEFAULT_DATASET_ID)
     parser.add_argument("--collection", default=DEFAULT_COLLECTION)
     parser.add_argument("--split", default="train")
     parser.add_argument("--max-rows", type=int, default=500)
     parser.add_argument("--max-chars", type=int, default=1200)
     parser.add_argument("--overlap", type=int, default=120)
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--shuffle-buffer", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=20260720)
+    parser.add_argument("--append", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     docs = build_docs(
-        stream_textbook_rows(split=args.split),
+        stream_corpus_rows(
+            dataset_id=args.dataset_id,
+            split=args.split,
+            shuffle_buffer=args.shuffle_buffer,
+            seed=args.seed,
+        ),
+        dataset_id=args.dataset_id,
         max_rows=args.max_rows,
         max_chars=args.max_chars,
         overlap=args.overlap,
     )
+    safe_dataset_name = args.dataset_id.replace("/", "_").replace("\\", "_")
     manifest = {
-        "dataset_id": DATASET_ID,
+        "dataset_id": args.dataset_id,
         "split": args.split,
         "collection": args.collection,
         "max_rows": args.max_rows,
         "chunks": len(docs),
         "max_chars": args.max_chars,
         "overlap": args.overlap,
-        "note": "MedRAG textbook corpus for MIRAGE RAG-agent evaluation.",
+        "shuffle_buffer": args.shuffle_buffer,
+        "seed": args.seed,
+        "append": args.append,
+        "note": "MedRAG corpus for MIRAGE RAG-agent evaluation.",
     }
-    _write_manifest(DEFAULT_OUTPUT_DIR / args.collection, manifest)
+    _write_manifest(DEFAULT_OUTPUT_DIR / safe_dataset_name / args.collection, manifest)
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     if args.dry_run:
         for sample in docs[:3]:
@@ -145,10 +170,10 @@ def main() -> None:
     store = MilvusStore.for_collection(args.collection)
     if store.has_collection():
         existing = len(store.query(output_fields=["chunk_id"], limit=1))
-        if existing:
+        if existing and not args.append:
             print(
                 f"Collection {args.collection} already exists and is non-empty. "
-                "Use another --collection to avoid duplicate inserts."
+                "Use another --collection or pass --append to add another corpus."
             )
             return
 
