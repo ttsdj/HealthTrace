@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -67,6 +68,11 @@ def main() -> None:
     parser.add_argument("--download", action="store_true", help="Download benchmark.json if missing")
     parser.add_argument("--force-download", action="store_true")
     parser.add_argument("--mode", choices=SUPPORTED_MODES, default="llm_only")
+    parser.add_argument(
+        "--rag-collection",
+        default="",
+        help="Milvus collection used by rag_agent mode, e.g. med_mirage_textbooks_v1.",
+    )
     parser.add_argument("--datasets", type=_parse_datasets, default=[])
     parser.add_argument("--max-cases", type=int, default=0)
     parser.add_argument("--max-cases-per-dataset", type=int, default=0)
@@ -90,6 +96,8 @@ def main() -> None:
     )
     parser.add_argument("--experiment-id", default="")
     args = parser.parse_args()
+    if args.rag_collection:
+        os.environ["MILVUS_MEDICAL_QA_COLLECTION"] = args.rag_collection
 
     benchmark_path = resolve_benchmark_path(
         PROJECT_ROOT,
@@ -138,6 +146,7 @@ def main() -> None:
         "benchmark_sha256": raw_sha256,
         "prompt_version": MIRAGE_PROMPT_VERSION,
         "mode": args.mode,
+        "rag_collection": args.rag_collection,
         "case_count": len(cases),
         "resumed_records": len(existing_by_key),
         "remaining_cases_at_start": len(cases_to_run),
