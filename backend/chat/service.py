@@ -43,7 +43,7 @@ def _build_context_messages(
         context_messages.append(
             SystemMessage(
                 content=(
-                    "【MedRetrieve 记忆检索结果】\n"
+                    "【HealthTrace 记忆检索结果】\n"
                     f"{memory_note}\n"
                     "请仅在和本轮问题相关时使用这些记忆，并避免把未确认信息当作诊断结论。"
                 )

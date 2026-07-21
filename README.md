@@ -1,260 +1,187 @@
-# MedRetrieveV2.0
+# HealthTrace
 
-MedRetrieveV2.0 是一个面向医疗知识问答的 RAG 工程项目。它把 Milvus 混合检索、Neo4j 医疗知识图谱、会话记忆、医疗安全边界、文档解析入库和 RAG 评测整合成一个可运行的医疗检索工作台。
+HealthTrace 是一个面向个人用户的健康档案与循证智能咨询系统。当前版本以可运行的医疗 RAG 工作为基础，提供文档入库、混合检索、知识图谱、会话记忆、安全边界和可复现评测；后续将逐步加入个人健康事实、时间轴、主动追问和长期健康任务。
 
-> 免责声明：本项目用于学习、工程展示和医学知识检索辅助，不提供诊断、处方或急救决策。任何医疗建议都应以专业医生意见为准。
+> 本项目用于工程研究与医学知识辅助，不提供诊断、处方、药物剂量调整或急救决策，也不能替代医生。
 
 ## 3 分钟看懂项目（STAR）
 
-### S - Situation：为什么做
+### S - Situation
 
-普通聊天模型在医疗问答中容易出现三个问题：回答没有来源、检索证据不稳定、对高风险医学问题缺少边界。MedRetrieveV2.0 的目标是做一个“可追溯、可降级、可评测”的医疗 RAG 系统，让每次回答尽量绑定检索证据、结构化知识和安全提示。
+普通大模型用于健康咨询时容易出现答案缺少来源、患者资料混入公共知识、检索失败直接中断以及高风险问题缺乏边界等问题。个人健康资料还涉及身份隔离、可信状态、时间关系和删除生命周期，不能只作为普通 RAG 文档处理。
 
-### T - Task：要解决什么
+### T - Task
 
-项目第一阶段聚焦五件事：
+HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康咨询系统：一方面从 Milvus、Neo4j 和医学文档获取公共证据；另一方面逐步将个人报告转成受权限保护、可验证的健康事实，并根据问题按需查询，而不是把完整病历交给模型。
 
-- 用 Milvus 建立医疗文档/问答向量库，并支持 Dense、BM25、Hybrid RRF 检索。
-- 接入 Neo4j 医疗知识图谱，作为结构化医学证据补充。
-- 增加情景记忆和语义记忆，让多轮问答保留上下文。
-- 增加医疗安全边界，包括高风险症状、药品剂量、隐私脱敏。
-- 建立 RAGCare-QA / RAGAS 评测流程，量化 Recall@K、Faithfulness、Answer Relevance 等指标。
+### A - Action
 
-### A - Action：怎么实现
-
-核心链路如下：
+当前调用链：
 
 ```text
 用户问题
-  -> FastAPI 鉴权与会话隔离
-  -> 医疗安全边界与隐私脱敏
-  -> 轻量 NER / 意图识别
-  -> 情景记忆 + 语义记忆召回
-  -> Milvus Hybrid RAG 检索
-  -> Neo4j KG 结构化证据查询
-  -> 证据压缩与冲突提示
-  -> OpenAI 兼容 LLM 生成回答
-  -> 前端展示回答、检索路径、证据、RAGAS-lite 和安全状态
+  -> FastAPI 鉴权与用户会话隔离
+  -> 隐私脱敏、医疗风险与轻量意图识别
+  -> Recent Messages + Persistent Note + 语义/情景记忆
+  -> LangGraph 复杂度路由与纠错检索
+  -> Milvus BGE-M3 Dense + 原生 BM25 + RRF
+  -> 可选 Reranker、Neo4j KG 和医院导航工具
+  -> 证据压缩、冲突提示和安全回答
+  -> Vue 工作台展示引用、检索 Trace 和运行质量信号
 ```
 
-工程上做了这些取舍：
+工程策略：
 
-- 检索层优先 Hybrid RAG，失败时按 Dense / Sparse / 无检索证据逐级降级，避免系统直接退出。
-- 文档解析优先 MinerU，超时或失败时回退 PyPDF / pypdfium2，必要时再走 OCR。
-- 大 PDF 入库采用“前若干页/前若干 chunk 先可检索，剩余后台继续处理”的渐进式策略。
-- 模型配置只从 `.env` 读取，仓库只提交 `.env.example`。
-- Neo4j 被视为增强能力，未启动时 KG 降级，不阻断普通 RAG 问答。
+- 检索按 Hybrid、Dense、Sparse、No Evidence 逐级降级。
+- PDF 优先 MinerU，失败或超时后回退 PyPDF/pypdfium2，稀疏页面可继续进入 PaddleOCR。
+- 大文档先写入首批页面或 chunk，使部分内容尽早可检索，剩余批次后台继续处理。
+- PostgreSQL 保存用户、会话和父块；Redis 缓存父块与短期状态；Milvus 保存叶子块与记忆；Neo4j 是可选增强服务。
+- 配置只从本地 `.env` 读取，代码和 Git 历史不保存真实密钥。
 
-### R - Result：当前完成度
+### R - Result
 
-已完成：
+当前已经完成并有代码链路：
 
-- FastAPI 后端、Vue 3 前端、JWT 登录注册、会话隔离。
-- Docker Compose 一键启动 PostgreSQL、Redis、Milvus、etcd、MinIO、Attu。
-- Milvus 三类 collection 设计：医疗问答库、情景记忆、语义记忆。
-- BGE-M3 embedding、Milvus 2.5+ 原生 BM25、Hybrid RRF、可选 rerank。
-- Neo4j 医疗 KG 查询工具和 KG 降级健康检查。
-- 医疗安全边界、隐私脱敏、药品剂量提示。
-- RAGCare-QA 评测脚本和 RAGAS 评测脚本。
-- `start.bat` 一行启动本地开发环境。
+- FastAPI、Vue 3、JWT 登录注册和按用户隔离的会话持久化。
+- BGE-M3、Milvus 2.5+ 原生 BM25、Hybrid RRF、三级父子分块与检索降级。
+- MinerU/PDF/OCR 解析降级、渐进式向量入库与批量 Milvus 写入。
+- Neo4j 医疗知识图谱工具、语义/情景记忆、上下文压缩和医疗安全规则。
+- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；仓库测试基线为 35 项通过。
 
-待继续完善：
+尚未完成、不得对外宣称已实现：
 
-- 大规模中文医疗评测集和人工审核 golden set。
-- 生产级任务队列、后台 worker、对象存储和监控告警。
-- 更严格的药品剂量知识库校验和医生审核流程。
+- 公共医学知识与个人病历的完整数据分域。
+- FHIR-like 患者事实表、可信状态、健康时间轴和 Typed Patient Tools。
+- 完整咨询 Agent 的 Evidence State、Action Policy 和长期健康任务。
+- 多模态向量、Any-to-Any 检索和临床级医学影像理解。
+
+详细证据见 `docs/CURRENT_IMPLEMENTATION_AUDIT.md` 和 `docs/METRIC_REPRODUCIBILITY_AUDIT.md`。
 
 ## 架构
 
 ```text
-MedRetrieveV2.0/
-  backend/                  FastAPI 后端
-    api/routes/             鉴权、会话、聊天、文档、健康检查、评测 API
-    chat/                   聊天编排、SSE 流式输出、会话存储
-    rag/                    检索、RRF 融合、降级策略、上下文压缩
-    indexing/               文档解析、分块、embedding、Milvus 写入
-    kg/                     Neo4j 医疗知识图谱查询
-    memory/                 情景记忆和语义记忆
-    medical_nlp/            医疗安全边界、隐私脱敏、轻量规则
-    evaluation/             RAGCare-QA、RAGAS、检索指标
-    infra/                  数据库、Redis、JWT 等基础设施
-  frontend/                 Vue 3 + TypeScript + Pinia + Vite
-  scripts/                  初始化、导入、评测和仓库检查脚本
-  docker-compose.yml        PostgreSQL + Redis + Milvus 基础服务
-  .env.example              本地配置模板，不含真实密钥
-  start.bat                 Windows 一行启动脚本
+frontend/ Vue 3 + TypeScript + Pinia
+              |
+              v
+backend/api/ FastAPI + JWT + SSE
+              |
+    +---------+----------+----------------+
+    |                    |                |
+backend/chat          backend/rag      backend/indexing
+会话与上下文          LangGraph RAG    解析、分块、向量化
+    |                    |                |
+    +------ PostgreSQL / Redis -----------+
+                         |
+              Milvus / Neo4j / LLM
 ```
 
 ## 快速运行
 
-### 1. 克隆项目
+### 1. 准备环境
+
+需要 Python 3.12、Node.js、Docker Desktop。Docker 仅在 `managed` 模式下必须由本项目启动。
 
 ```cmd
-git clone https://github.com/ttsdj/MedRetrieveV2.0.git
-cd MedRetrieveV2.0
-```
-
-### 2. 创建 Python 环境
-
-推荐 Python 3.12：
-
-```cmd
+git clone <your-healthtrace-repository-url>
+cd HealthTrace
 python -m venv .venv
-.\.venv\Scripts\activate
-python -m pip install -U pip
-pip install -e ".[dev]"
-```
-
-如需 OCR 能力：
-
-```cmd
-pip install -e ".[ocr]"
-```
-
-### 3. 安装前端依赖
-
-```cmd
+.venv\Scripts\python.exe -m pip install -U pip
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
 cd frontend
 npm install
 cd ..
-```
-
-### 4. 配置环境变量
-
-```cmd
 copy .env.example .env
 ```
 
-然后编辑 `.env`，至少填写：
-
-```env
-LLM_API_KEY=你的模型服务密钥
-BASE_URL=你的 OpenAI 兼容服务地址
-MODEL=你的主模型名
-FAST_MODEL=你的快速模型名
-GRADE_MODEL=你的评分模型名
-JWT_SECRET_KEY=换成随机长字符串
-```
-
-可选配置：
-
-- `MINERU_TOKEN`：MinerU 文档解析服务 token。
-- `NEO4J_URL` / `NEO4J_USER` / `NEO4J_PASSWORD`：医疗知识图谱。
-- `AMAP_MAPS_API_KEY`：附近医院和地图服务。
-
-### 5. 启动 Docker 基础服务
+如需本地 OCR：
 
 ```cmd
-docker compose up -d
+.venv\Scripts\python.exe -m pip install -e ".[ocr]"
 ```
 
-服务端口：
+### 2. 配置 `.env`
 
-| 服务 | 地址 |
-|---|---|
-| FastAPI | http://127.0.0.1:8000 |
-| API Docs | http://127.0.0.1:8000/docs |
-| Frontend | http://localhost:3000 |
-| Attu | http://localhost:8080 |
-| Milvus | 127.0.0.1:19530 |
-| PostgreSQL | 127.0.0.1:5432 |
-| Redis | 127.0.0.1:6379 |
+至少填写：
 
-### 6. 一行启动开发环境
+```env
+LLM_API_KEY=your-key
+BASE_URL=https://your-openai-compatible-endpoint/v1
+MODEL=your-model
+FAST_MODEL=your-fast-model
+GRADE_MODEL=your-grade-model
+JWT_SECRET_KEY=replace-with-a-long-random-value
+```
 
-Windows：
+基础设施模式：
+
+```env
+# 启动本仓库的 PostgreSQL、Redis、Milvus、MinIO 和 Attu
+HEALTHTRACE_INFRA_MODE=managed
+
+# 或复用 DATABASE_URL、REDIS_URL、MILVUS_HOST 等指向的已有服务
+HEALTHTRACE_INFRA_MODE=external
+```
+
+### 3. 一行启动
 
 ```cmd
 start.bat
 ```
 
-这个脚本会：
+默认地址：
 
-1. 启动 Docker Compose 服务。
-2. 初始化数据库表。
-3. 启动 FastAPI 后端。
-4. 启动 Vue 前端。
-5. 打开浏览器访问前端。
+| 服务 | 地址 |
+|---|---|
+| 前端 | http://127.0.0.1:3000 |
+| FastAPI | http://127.0.0.1:8000 |
+| API 文档 | http://127.0.0.1:8000/docs |
+| 健康检查 | http://127.0.0.1:8000/health |
+| Attu | http://127.0.0.1:8080 |
 
-如果想手动启动：
+若 8000 或 3000 已被其他应用占用，启动脚本会自动尝试下一端口，并把 Vite 代理指向实际后端。
+
+## 手动启动与验证
 
 ```cmd
-.\.venv\Scripts\activate
-python -m backend.infra.database
-python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
+docker compose up -d
+.venv\Scripts\python.exe scripts\init_db_safe.py
+.venv\Scripts\python.exe -m uvicorn backend.app:app --host 127.0.0.1 --port 8000
 ```
 
-另开一个终端：
+另开终端：
 
 ```cmd
 cd frontend
 npm run dev
 ```
 
-## 常用命令
+验证：
 
 ```cmd
-docker compose ps
-docker compose up -d
-docker compose down
-
-python -m pytest
+.venv\Scripts\python.exe -m pytest -q
 npm --prefix frontend run build
-
-python scripts/check_repo_safety.py
-python scripts/evaluate_ragcare.py --stage pilot --baselines bm25,dense,hybrid
-python scripts/evaluate_ragas.py --concurrency 2 --output-id pilot-ragas
+.venv\Scripts\python.exe scripts\check_repo_safety.py
+docker compose config
 ```
-
-## 环境变量说明
-
-仓库不会提交真实 `.env`。请以 `.env.example` 为模板配置本地环境。
-
-核心变量：
-
-| 变量 | 用途 |
-|---|---|
-| `LLM_API_KEY` | OpenAI 兼容模型服务密钥 |
-| `BASE_URL` | OpenAI 兼容 API 地址 |
-| `MODEL` | 主回答模型 |
-| `FAST_MODEL` | 快速分类/标题/轻量任务模型 |
-| `GRADE_MODEL` | 文档相关性或评估模型 |
-| `EMBEDDING_MODEL` | 默认 `BAAI/bge-m3` |
-| `MILVUS_MEDICAL_QA_COLLECTION` | 医疗问答/文档知识库 |
-| `MILVUS_EPISODIC_MEMORY_COLLECTION` | 情景记忆 collection |
-| `MILVUS_SEMANTIC_MEMORY_COLLECTION` | 语义记忆 collection |
-| `MINERU_TOKEN` | 可选，MinerU 解析服务 |
-| `NEO4J_PASSWORD` | 可选，Neo4j 医疗知识图谱 |
-| `JWT_SECRET_KEY` | JWT 签名密钥，必须本地更换 |
 
 ## 数据与安全
 
-为了保持仓库干净：
+- 不提交 `.env`、API key、token、数据库密码和精确定位信息。
+- 不提交 `data/`、`volumes/`、模型权重、上传文件和原始评测集。
+- 技术 Markdown 可以进入 `docs/`；`docs/private/`、`docs/interview/` 和 `docs/local/` 永久忽略。
+- Neo4j、地图和 Reranker 是可选增强能力，失败时不得阻断普通知识检索。
+- 运行时 `ragas_lite` 是低成本启发式监控信号，不等于正式 RAGAS 评测结果。
+- 没有 gold evidence 的数据集不得报告 Recall@K。
 
-- 不提交 `.env`、真实 API key、token、数据库密码。
-- 不提交 `docs/` 内部面试资料。
-- 不提交 `data/`、`volumes/`、`logs/`、模型缓存、上传文档。
-- 不提交 RAGCare-QA 原始数据和真实医疗数据。
-- 提交前运行：
+## 迭代路线
 
-```cmd
-python scripts/check_repo_safety.py
-```
-
-## 评测设计
-
-当前评测分两类：
-
-1. 检索指标：Recall@5、Precision@5、F1@5、MRR、nDCG。
-2. 生成质量：RAGAS / RAGAS-lite，关注上下文相关性、忠实度、答案相关性。
-
-RAGCare-QA 用作公开英文医疗 RAG 评测集。项目默认不把数据集提交到仓库；新机器需要自行下载或按脚本准备。
-
-## 面试表述示例
-
-可以这样概括：
-
-> 我做了一个医疗 RAG 工作台 MedRetrieveV2.0，后端用 FastAPI，前端用 Vue 3，检索层用 Milvus 的 BGE-M3 Dense + 原生 BM25 做 Hybrid RRF，并接入 Neo4j 医疗知识图谱、会话记忆和医疗安全边界。工程上实现了文档解析降级、检索降级、KG 降级、隐私脱敏和 RAGCare-QA/RAGAS 评测，让系统不仅能回答，还能展示证据链和质量指标。
+1. 公共知识与个人病历数据分域。
+2. 患者结构化事实、可信状态和健康时间轴。
+3. Patient Context Planner、Typed Tools 和主动追问。
+4. Evidence State、Action Policy 与咨询状态机。
+5. 在硬件或外部推理资源满足后开展多模态 POC。
+6. 长期提醒、健康目标和周期摘要。
+7. 检索、生成、Agent、抽取、安全和性能消融评测。
 
 ## License
 

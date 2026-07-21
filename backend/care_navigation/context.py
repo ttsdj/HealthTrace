@@ -55,11 +55,11 @@ def _optional_float(value) -> float | None:
 
 
 _LOCATION_CONTEXT: ContextVar[LocationContext] = ContextVar(
-    "medretrieve_location_context",
+    "healthtrace_location_context",
     default=LocationContext(),
 )
 _CARE_NAVIGATION_CALLS: ContextVar[CareNavigationCallState] = ContextVar(
-    "medretrieve_care_navigation_calls",
+    "healthtrace_care_navigation_calls",
     default=CareNavigationCallState(),
 )
 

@@ -149,7 +149,7 @@ def parse_pdf_with_mineru(file_path: str, filename: str) -> list[Document]:
 
     executable = _mineru_command()
     timeout = mineru_timeout_seconds()
-    with tempfile.TemporaryDirectory(prefix="medretrieve_mineru_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="healthtrace_mineru_") as tmp:
         output_dir = Path(tmp)
         args = _build_command(executable, file_path, output_dir, timeout)
         env = os.environ.copy()

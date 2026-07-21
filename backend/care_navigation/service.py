@@ -340,5 +340,5 @@ def _map_uri(
     return (
         "https://uri.amap.com/marker?"
         f"position={longitude:.6f},{latitude:.6f}"
-        f"&name={quote(name)}&src=medretrieve"
+        f"&name={quote(name)}&src=healthtrace"
     )

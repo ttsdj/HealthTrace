@@ -36,8 +36,11 @@ logs/
 ablation_results/
 .worktrees/
 
-# Documentation (internal interview materials)
-docs/
+# Documentation
+# Technical Markdown under docs/ is tracked. Private/interview material stays local.
+docs/private/
+docs/interview/
+docs/local/
 *.docx
 presentation.html
 project_visualization.html

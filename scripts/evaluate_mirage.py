@@ -1,4 +1,4 @@
-"""Run MIRAGE benchmark for MedRetrieveV2.0."""
+"""Run MIRAGE benchmark for HealthTrace."""
 from __future__ import annotations
 
 import argparse
@@ -62,7 +62,7 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Evaluate MedRetrieveV2.0 on the MIRAGE medical QA benchmark."
+        description="Evaluate HealthTrace on the MIRAGE medical QA benchmark."
     )
     parser.add_argument("--data-path", default="", help="Path to MIRAGE benchmark.json")
     parser.add_argument("--download", action="store_true", help="Download benchmark.json if missing")

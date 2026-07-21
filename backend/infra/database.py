@@ -4,7 +4,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+psycopg2://postgres:postgres@localhost:5432/medretrieve_v2",
+    "postgresql+psycopg2://postgres:postgres@localhost:5432/healthtrace",
 )
 
 engine = create_engine(

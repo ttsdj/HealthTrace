@@ -1,5 +1,6 @@
 import os
 import socket
+from urllib.parse import urlparse
 
 from fastapi import APIRouter
 from sqlalchemy import text
@@ -11,6 +12,14 @@ from backend.indexing.milvus_client import COLLECTION_ENV_BY_KIND, get_milvus_st
 router = APIRouter(tags=["health"])
 
 
+def _connection_target(url: str, default_host: str, default_port: int) -> tuple[str, int]:
+    try:
+        parsed = urlparse(url)
+        return parsed.hostname or default_host, parsed.port or default_port
+    except (TypeError, ValueError):
+        return default_host, default_port
+
+
 def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -20,8 +29,11 @@ def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
 
 
 def _check_postgres() -> dict:
-    if not _port_open("127.0.0.1", 5432):
-        return {"ok": False, "error": "postgres port 5432 is not reachable"}
+    host, port = _connection_target(
+        os.getenv("DATABASE_URL", ""), "127.0.0.1", 5432
+    )
+    if not _port_open(host, port):
+        return {"ok": False, "error": f"postgres {host}:{port} is not reachable"}
     try:
         db = SessionLocal()
         try:
@@ -34,8 +46,9 @@ def _check_postgres() -> dict:
 
 
 def _check_redis() -> dict:
-    if not _port_open("127.0.0.1", 6379):
-        return {"ok": False, "error": "redis port 6379 is not reachable"}
+    host, port = _connection_target(os.getenv("REDIS_URL", ""), "127.0.0.1", 6379)
+    if not _port_open(host, port):
+        return {"ok": False, "error": f"redis {host}:{port} is not reachable"}
     try:
         cache._get_client().ping()
         return {"ok": True}
@@ -69,8 +82,9 @@ def _check_milvus() -> dict:
 
 
 def _check_neo4j() -> dict:
-    if not _port_open("127.0.0.1", 7687):
-        return {"ok": False, "error": "neo4j bolt port 7687 is not reachable"}
+    host, port = _connection_target(os.getenv("NEO4J_URL", ""), "127.0.0.1", 7687)
+    if not _port_open(host, port):
+        return {"ok": False, "error": f"neo4j bolt {host}:{port} is not reachable"}
     try:
         from backend.kg.client import get_kg_client
 
@@ -116,7 +130,8 @@ async def health():
     }
     ready = all(item.get("ok") for item in core_services.values())
     return {
-        "service": "MedRetrieveV2.0",
+        "service": "HealthTrace",
+        "infra_mode": os.getenv("HEALTHTRACE_INFRA_MODE", "managed").lower(),
         "ready": ready,
         "strict_startup": os.getenv("STRICT_STARTUP", "false").lower() == "true",
         "services": {**core_services, **optional_services},

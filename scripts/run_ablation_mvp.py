@@ -1,4 +1,4 @@
-"""Run a small MedRetrieve ablation suite for resume-ready evidence.
+"""Run a small HealthTrace ablation suite for reproducible evidence.
 
 The runner intentionally focuses on fast MVP evidence:
 - reuse the finished dense/BM25/hybrid 420-case retrieval benchmark;
@@ -7,7 +7,7 @@ The runner intentionally focuses on fast MVP evidence:
 - estimate streaming delivery benefit with an explicit delivery-layer probe;
 - measure context compression and rule guardrail behavior.
 
-Outputs are written only under ``ablation_results/medretrieve/<run_id>/``.
+Outputs are written only under ``ablation_results/healthtrace/<run_id>/``.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ from backend.rag.context_compression import compress_documents_for_context  # no
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = PROJECT_ROOT / "data" / "ragcare"
-DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "ablation_results" / "medretrieve"
+DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "ablation_results" / "healthtrace"
 DEFAULT_EXISTING_BASELINE = (
     DATA_ROOT
     / "evaluations"
@@ -563,7 +563,7 @@ def write_report(output_dir: Path, payload: dict) -> None:
             ]
         )
     report = [
-        "# MedRetrieve MVP Ablation Report",
+        "# HealthTrace MVP Ablation Report",
         "",
         f"- Run ID: `{payload['run_id']}`",
         f"- MVP cases: `{payload['case_count']}`",
@@ -653,7 +653,7 @@ def write_report(output_dir: Path, payload: dict) -> None:
             "",
             "## Resume-Safe Wording",
             "",
-            "- Built an ablation runner for MedRetrieve over a 30-case RAGCare MVP subset plus the existing 420-case retrieval benchmark.",
+            "- Built an ablation runner for HealthTrace over a 30-case RAGCare MVP subset plus the existing 420-case retrieval benchmark.",
             "- Compared query rewrite on/off, serial decomposition vs LangGraph Send fanout, evidence compression, SSE delivery behavior, and medical safety guardrails.",
             "- Reported deterministic Recall@5/MRR and latency metrics without mixing retrieval quality with streaming UX claims.",
         ]

@@ -1,4 +1,4 @@
-"""Pre-commit safety checks for MedRetrieveV2.0.
+"""Pre-commit safety checks for HealthTrace.
 
 The script intentionally checks only files tracked or staged by Git. Local
 private files may exist, but they must not enter the repository.
@@ -15,7 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 FORBIDDEN_PATH_PREFIXES = (
-    "docs/",
+    "docs/private/",
+    "docs/interview/",
+    "docs/local/",
     "data/",
     "volumes/",
     "logs/",
@@ -50,6 +52,11 @@ SECRET_PATTERNS = [
     ),
 ]
 
+LEGACY_BRAND_PATTERN = re.compile(
+    r"(?i)(med" r"retrieve(?:v2(?:\.0)?)?|med" r"retrieve-v2|med_" r"retrieve|super" r"mew)"
+)
+LEGACY_BRAND_EXEMPT_PREFIXES = ("docs/",)
+
 TEXT_SUFFIXES = {
     ".bat",
     ".cmd",
@@ -72,7 +79,7 @@ TEXT_SUFFIXES = {
 
 def git_lines(*args: str) -> list[str]:
     result = subprocess.run(
-        ["git", *args],
+        ["git", "-c", f"safe.directory={ROOT}", *args],
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -119,6 +126,8 @@ def main() -> int:
         for pattern in SECRET_PATTERNS:
             if pattern.search(text):
                 failures.append(f"Possible secret detected in {rel}: {pattern.pattern}")
+        if not rel.startswith(LEGACY_BRAND_EXEMPT_PREFIXES) and LEGACY_BRAND_PATTERN.search(text):
+            failures.append(f"Legacy project brand detected in {rel}")
 
     if failures:
         print("Repository safety check failed:\n")

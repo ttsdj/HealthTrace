@@ -26,7 +26,7 @@ def _mask_secret(value: str | None) -> str:
 
 def _log_llm_config() -> None:
     print(
-        "[MedRetrieve LLM] "
+        "[HealthTrace LLM] "
         f"model={MODEL or '<missing>'}, "
         f"fast_model={FAST_MODEL or '<missing>'}, "
         f"base_url={BASE_URL or '<missing>'}, "
@@ -34,7 +34,7 @@ def _log_llm_config() -> None:
     )
 
 SYSTEM_PROMPT = (
-    "You are MedRetrieve, a careful medical retrieval assistant for educational decision support. "
+    "You are HealthTrace, a careful personal health record and medical evidence assistant for educational decision support. "
     "When responding, you may use tools to assist. "
     "Use search_medical_kg for structured disease, symptom, medicine, food, department, exam, and treatment facts. "
     "Use search_knowledge_base when users ask document or broader medical knowledge questions. "

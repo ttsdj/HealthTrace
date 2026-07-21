@@ -1,4 +1,4 @@
-"""Offline evaluation helpers for MedRetrieve."""
+"""Offline evaluation helpers for HealthTrace."""
 
 from backend.evaluation.metrics import evaluate_retrieval_case
 

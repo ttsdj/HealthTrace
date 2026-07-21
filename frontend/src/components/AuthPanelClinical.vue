@@ -6,14 +6,14 @@
           <i class="fas fa-wave-square"></i>
         </div>
         <div>
-          <strong>MedRetrieve V2</strong>
-          <span>Medical RAG Workbench</span>
+          <strong>HealthTrace</strong>
+          <span>Personal Health Intelligence</span>
         </div>
       </div>
 
-      <h1>面向医疗知识检索的 RAG 工作台</h1>
+      <h1>让健康资料形成可追溯的个人档案</h1>
       <p>
-        登录后可进行医学问答、查看 RAG 检索路径、管理会话历史；管理员可维护文档知识库与向量检索数据。
+        管理健康资料、追踪历史信息，并基于可追溯医学证据获得安全、审慎的智能咨询。
       </p>
 
       <div class="auth-feature-grid">

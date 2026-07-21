@@ -1,1 +1,1 @@
-"""MedRetrieve V2 backend package."""
+"""HealthTrace backend package."""

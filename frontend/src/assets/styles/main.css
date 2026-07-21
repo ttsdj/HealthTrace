@@ -1591,7 +1591,7 @@ span.cite-ref:hover {
 }
 
 /* --------------------------------------------------------------------------
-   MedRetrieve V2 clinical workstation
+   HealthTrace clinical workstation
    -------------------------------------------------------------------------- */
 :root {
     --primary-color: #111315;
@@ -2829,7 +2829,7 @@ textarea {
     }
 }
 
-/* MedRetrieve clinical workstation refresh */
+/* HealthTrace clinical workstation refresh */
 :root {
     --med-bg: #eef5ff;
     --med-surface: rgba(255, 255, 255, 0.88);

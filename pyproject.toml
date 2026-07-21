@@ -1,11 +1,11 @@
 [project]
-name = "MedRetrieveV2.0"
+name = "healthtrace"
 version = "0.1.0"
-description = "MedRetrieveV2.0 medical RAG workspace with Milvus hybrid retrieval, Neo4j KG tools, memory, safety guards, and recall evaluation."
+description = "HealthTrace personal health record and evidence-grounded consultation workspace."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [
-    { name = "MedRetrieve Project Team" },
+    { name = "HealthTrace Project Team" },
 ]
 dependencies = [
     "rich>=14.2.0",

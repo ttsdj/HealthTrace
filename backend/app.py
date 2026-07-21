@@ -22,7 +22,7 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="MedRetrieve V2 Medical RAG API")
+    app = FastAPI(title="HealthTrace Health Consultation API")
 
     @app.on_event("startup")
     async def _startup_init_db():

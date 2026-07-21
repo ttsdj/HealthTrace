@@ -5,8 +5,8 @@
         <i class="fas fa-wave-square"></i>
       </div>
       <div>
-        <div class="brand-name">MedRetrieve <span>V2.0</span></div>
-        <div class="brand-subtitle">医疗知识问答系统</div>
+        <div class="brand-name">HealthTrace <span>Beta</span></div>
+        <div class="brand-subtitle">个人健康档案与智能咨询</div>
       </div>
     </div>
 

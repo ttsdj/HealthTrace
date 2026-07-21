@@ -150,7 +150,7 @@ export const useChatStore = defineStore('chat', {
         throw new Error('当前浏览器环境不支持安全定位，请使用 localhost 或 HTTPS');
       }
       const accepted = confirm(
-        '是否授权 MedRetrieve 获取一次当前位置，用于搜索附近医院和计算距离？坐标仅随下一条消息发送，不写入长期记忆。'
+        '是否授权 HealthTrace 获取一次当前位置，用于搜索附近医院和计算距离？坐标仅随下一条消息发送，不写入长期记忆。'
       );
       if (!accepted) return;
 
