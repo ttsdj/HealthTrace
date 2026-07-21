@@ -18,7 +18,7 @@
 |---|---|---|
 | 1 | `117cb1f` | 建立 HealthTrace 迁移基线 |
 | 2 | `5705e25` | 统一品牌、默认运行配置和双模式启动 |
-| 3 | `docs: add implementation and metric audits` | 当前实现与指标审计 |
+| 3 | `d20d18b` | 当前实现与指标审计 |
 | 4 | `test: add HealthTrace migration regression coverage` | 回归、安全和可运行性验证 |
 
 ## 本地运行兼容

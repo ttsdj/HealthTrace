@@ -67,7 +67,7 @@ PostgreSQL 当前只有用户、会话、消息和父块四类核心表。Milvus
 
 ## 测试覆盖判断
 
-迁移前基线为 35 项测试通过，覆盖 RAGCare 数据转换/指标、RAGAS 解析、MIRAGE 指标、OCR 路由和医院导航。缺口包括登录会话端到端、真实 Milvus/Neo4j 集成、患者数据隔离、安全攻击集、真实 OCR 准确率和 Health Agent 状态决策。
+迁移前基线为 35 项测试通过；Phase 0 新增健康状态、连接配置、品牌配置和双用户同 session id 隔离测试后为 39 项通过。当前覆盖 RAGCare 数据转换/指标、RAGAS 解析、MIRAGE 指标、OCR 路由和医院导航。缺口包括完整登录端到端、真实 Milvus/Neo4j 集成、tenant/patient 数据隔离、安全攻击集、真实 OCR 准确率和 Health Agent 状态决策。
 
 ## 下一步
 

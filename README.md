@@ -46,7 +46,7 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - BGE-M3、Milvus 2.5+ 原生 BM25、Hybrid RRF、三级父子分块与检索降级。
 - MinerU/PDF/OCR 解析降级、渐进式向量入库与批量 Milvus 写入。
 - Neo4j 医疗知识图谱工具、语义/情景记忆、上下文压缩和医疗安全规则。
-- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；仓库测试基线为 35 项通过。
+- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；迁移后仓库测试为 39 项通过。
 
 尚未完成、不得对外宣称已实现：
 

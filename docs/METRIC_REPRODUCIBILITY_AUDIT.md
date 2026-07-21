@@ -9,7 +9,7 @@
 ### 代码测试
 
 - 状态：`VERIFIED`
-- 基线：35 passed
+- 当前结果：39 passed（迁移前 35 项，Phase 0 新增 4 项）
 - 命令：`.venv\Scripts\python.exe -m pytest -q`
 - 含义：证明当前测试覆盖的模块行为通过，不代表临床效果或全链路生产可用。
 
