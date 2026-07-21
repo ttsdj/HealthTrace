@@ -1,0 +1,26 @@
+{
+  "benchmark": "MIRAGE",
+  "benchmark_sha256": "6f7f08c64cd2efe02a5d0c247229813c90db345d9dd6e3a451b5d24146d0f8fa",
+  "case_count": 7663,
+  "model": "deepseek-v4-flash",
+  "results": {
+    "llm_only": {
+      "overall_accuracy": 0.787812,
+      "macro_accuracy": 0.785602,
+      "failure_rate": 0.0,
+      "mean_latency_seconds": 0.769746
+    },
+    "pubmed_rag_small_corpus": {
+      "overall_accuracy": 0.730132,
+      "macro_accuracy": 0.667463,
+      "failure_rate": 0.0,
+      "mean_latency_seconds": 2.242744,
+      "corpus_rows": 300,
+      "chunks": 462,
+      "top_k": 5,
+      "max_chars": 1200,
+      "overlap": 120
+    }
+  },
+  "interpretation": "The small-corpus PubMed RAG run is an end-to-end validation, not an accuracy improvement over the LLM-only baseline."
+}
