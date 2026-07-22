@@ -89,7 +89,7 @@ def plan_consultation(username: str, query: str) -> ConsultationPlan:
             db.close()
 
     dosage_or_medication = safety["dosage_guard_triggered"] or intent == "drug_info"
-    if is_personal and dosage_or_medication and missing_fields:
+    if is_personal and required_fields and missing_fields:
         return ConsultationPlan(
             intent=intent,
             risk_level="guarded",
@@ -98,7 +98,11 @@ def plan_consultation(username: str, query: str) -> ConsultationPlan:
             required_evidence_sources=sources,
             evidence_state=EvidenceState.PATIENT_DATA_MISSING,
             action=AgentAction.ASK,
-            action_reason="required_medication_safety_fields_missing",
+            action_reason=(
+                "required_medication_safety_fields_missing"
+                if dosage_or_medication
+                else "required_patient_context_missing"
+            ),
         )
 
     return ConsultationPlan(

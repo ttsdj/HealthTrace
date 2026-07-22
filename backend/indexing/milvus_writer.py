@@ -62,3 +62,6 @@ class MilvusWriter:
                 if progress_callback:
                     processed = min(i + batch_size, total)
                     progress_callback(processed, total)
+
+            # The API reports a document as indexed only after all inserted rows are searchable.
+            client.flush(self.milvus_manager.collection_name)

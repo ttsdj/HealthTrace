@@ -65,6 +65,13 @@ class EmbeddingService:
         except Exception as e:
             raise Exception(f"本地密集嵌入模型调用失败: {str(e)}") from e
 
+    def get_embedding(self, text: str) -> list[float]:
+        """Embed one query while keeping batch embedding as the single implementation path."""
+        embeddings = self.get_embeddings([text])
+        if not embeddings:
+            raise ValueError("Embedding backend returned no vector for the query")
+        return embeddings[0]
+
 
 # 全进程唯一实例
 embedding_service = EmbeddingService()

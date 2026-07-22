@@ -22,7 +22,7 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 用户问题
   -> FastAPI 鉴权与用户会话隔离
   -> 隐私脱敏、医疗风险与轻量意图识别
-  -> 最小化患者事实 + Recent Messages + Persistent Note + 语义/情景记忆
+  -> 最小化患者事实 + 私有病历证据 + Recent Messages + Persistent Note + 语义/情景记忆
   -> 咨询预检：HIGH_RISK / PATIENT_DATA_MISSING / ANSWER
   -> LangGraph 复杂度路由与纠错检索
   -> Milvus BGE-M3 Dense + 原生 BM25 + RRF
@@ -51,7 +51,7 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - Neo4j 医疗知识图谱工具、语义/情景记忆、上下文压缩和医疗安全规则。
 - tenant/patient 数据边界、FHIR-like 患者事实、来源可追溯时间轴和长期任务基础。
 - 确定性咨询预检、Evidence State/Action Trace 与高风险 LLM 旁路。
-- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 60 项通过。
+- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 66 项通过。
 
 尚未完成、不得对外宣称已实现：
 

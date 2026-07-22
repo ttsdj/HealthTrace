@@ -269,17 +269,26 @@ def chat_with_agent(
     trace_base.update(consultation_plan.trace_fields())
     guarded_response = preflight_response(consultation_plan)
 
-    try:
-        memory_hits = memory_service.retrieve(user_text, user_id, session_id)
-        memory_note = memory_service.format_for_prompt(memory_hits)
-    except Exception as e:
-        print(f"Memory retrieval error: {e}")
+    if guarded_response:
         memory_hits = {}
         memory_note = ""
+        patient_context = ""
+        patient_context_meta = {
+            "patient_context_accessed": False,
+            "reason": "preflight_guarded",
+        }
+    else:
+        try:
+            memory_hits = memory_service.retrieve(user_text, user_id, session_id)
+            memory_note = memory_service.format_for_prompt(memory_hits)
+        except Exception as e:
+            print(f"Memory retrieval error: {e}")
+            memory_hits = {}
+            memory_note = ""
 
-    patient_context, patient_context_meta = build_verified_patient_context(
-        user_id, redacted_user_text
-    )
+        patient_context, patient_context_meta = build_verified_patient_context(
+            user_id, redacted_user_text
+        )
     trace_base.update(patient_context_meta)
     if patient_context:
         memory_note = f"{patient_context}\n{memory_note}".strip()
@@ -414,17 +423,26 @@ async def chat_with_agent_stream(
 
     set_rag_step_queue(_RagStepProxy())
 
-    try:
-        memory_hits = memory_service.retrieve(user_text, user_id, session_id)
-        memory_note = memory_service.format_for_prompt(memory_hits)
-    except Exception as e:
-        print(f"Memory retrieval error: {e}")
+    if guarded_response:
         memory_hits = {}
         memory_note = ""
+        patient_context = ""
+        patient_context_meta = {
+            "patient_context_accessed": False,
+            "reason": "preflight_guarded",
+        }
+    else:
+        try:
+            memory_hits = memory_service.retrieve(user_text, user_id, session_id)
+            memory_note = memory_service.format_for_prompt(memory_hits)
+        except Exception as e:
+            print(f"Memory retrieval error: {e}")
+            memory_hits = {}
+            memory_note = ""
 
-    patient_context, patient_context_meta = build_verified_patient_context(
-        user_id, redacted_user_text
-    )
+        patient_context, patient_context_meta = build_verified_patient_context(
+            user_id, redacted_user_text
+        )
     trace_base.update(patient_context_meta)
     if patient_context:
         memory_note = f"{patient_context}\n{memory_note}".strip()

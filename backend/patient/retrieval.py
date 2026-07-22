@@ -31,23 +31,31 @@ def retrieve_patient_records(
     store = get_milvus_store("patient_record")
     filter_expr = patient_scope_filter(scope)
     attempts: list[dict] = []
-    dense = embedding_service.get_embedding(query)
-
+    dense: list[float] | None = None
     try:
-        docs = store.hybrid_retrieve(dense, query, top_k=top_k, filter_expr=filter_expr)
-        attempts.append({"mode": "hybrid", "status": "ok", "count": len(docs)})
-        if docs:
-            return {"docs": docs, "mode": "hybrid", "attempts": attempts}
+        dense = embedding_service.get_embedding(query)
+        attempts.append({"mode": "embedding", "status": "ok"})
     except Exception as exc:
-        attempts.append({"mode": "hybrid", "status": "error", "error": str(exc)[:200]})
+        attempts.append(
+            {"mode": "embedding", "status": "error", "error": str(exc)[:200]}
+        )
 
-    try:
-        docs = store.dense_retrieve(dense, top_k=top_k, filter_expr=filter_expr)
-        attempts.append({"mode": "dense", "status": "ok", "count": len(docs)})
-        if docs:
-            return {"docs": docs, "mode": "dense", "attempts": attempts}
-    except Exception as exc:
-        attempts.append({"mode": "dense", "status": "error", "error": str(exc)[:200]})
+    if dense is not None:
+        try:
+            docs = store.hybrid_retrieve(dense, query, top_k=top_k, filter_expr=filter_expr)
+            attempts.append({"mode": "hybrid", "status": "ok", "count": len(docs)})
+            if docs:
+                return {"docs": docs, "mode": "hybrid", "attempts": attempts}
+        except Exception as exc:
+            attempts.append({"mode": "hybrid", "status": "error", "error": str(exc)[:200]})
+
+        try:
+            docs = store.dense_retrieve(dense, top_k=top_k, filter_expr=filter_expr)
+            attempts.append({"mode": "dense", "status": "ok", "count": len(docs)})
+            if docs:
+                return {"docs": docs, "mode": "dense", "attempts": attempts}
+        except Exception as exc:
+            attempts.append({"mode": "dense", "status": "error", "error": str(exc)[:200]})
 
     try:
         docs = store.sparse_retrieve(query, top_k=top_k, filter_expr=filter_expr)

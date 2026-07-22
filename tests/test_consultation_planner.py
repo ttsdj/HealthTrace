@@ -73,6 +73,27 @@ def test_personal_medication_query_passes_after_required_facts_exist(tmp_path, m
     assert "public_rag" in plan.required_evidence_sources
 
 
+def test_personal_report_query_asks_for_missing_observations(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'missing-report.db'}")
+    Base.metadata.create_all(engine)
+    TestSession = sessionmaker(bind=engine, expire_on_commit=False)
+    with TestSession() as db:
+        user = User(username="alice", password_hash="x", role="user")
+        db.add(user)
+        db.flush()
+        ensure_user_scope(db, user)
+        db.commit()
+    monkeypatch.setattr(planner, "SessionLocal", TestSession)
+
+    plan = plan_consultation("alice", "请结合我的检查报告解释血糖指标")
+
+    assert plan.action == AgentAction.ASK
+    assert plan.evidence_state == EvidenceState.PATIENT_DATA_MISSING
+    assert set(plan.missing_fields) == {"observations", "diagnostic_reports"}
+    assert plan.action_reason == "required_patient_context_missing"
+    assert "检查" in preflight_response(plan)
+
+
 def test_evidence_state_is_finalized_from_runtime_trace():
     assert finalize_evidence_state({"retrieved_chunks": [{"text": "evidence"}]})[
         "evidence_state"

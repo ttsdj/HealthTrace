@@ -18,10 +18,20 @@ def main() -> int:
         collections = []
         for name in sorted(client.list_collections()):
             description = client.describe_collection(name)
+            queryable_rows = client.query(
+                collection_name=name,
+                filter="id >= 0",
+                output_fields=["id"],
+                limit=16384,
+            )
             collections.append(
                 {
                     "name": name,
-                    "row_count": int(client.get_collection_stats(name).get("row_count", 0)),
+                    # Milvus stats can include tombstoned rows until compaction completes.
+                    "stats_row_count": int(
+                        client.get_collection_stats(name).get("row_count", 0)
+                    ),
+                    "queryable_row_count": len(queryable_rows),
                     "fields": [field["name"] for field in description.get("fields", [])],
                 }
             )
