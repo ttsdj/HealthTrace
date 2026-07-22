@@ -13,8 +13,16 @@ T = TypeVar("T")
 
 COLLECTION_ENV_BY_KIND = {
     "medical_qa": "MILVUS_MEDICAL_QA_COLLECTION",
+    "patient_record": "MILVUS_PATIENT_RECORD_COLLECTION",
     "episodic_memory": "MILVUS_EPISODIC_MEMORY_COLLECTION",
     "semantic_memory": "MILVUS_SEMANTIC_MEMORY_COLLECTION",
+}
+
+COLLECTION_DEFAULT_BY_KIND = {
+    "medical_qa": "healthtrace_medical_text_v1",
+    "patient_record": "healthtrace_patient_record_text_v1",
+    "episodic_memory": "healthtrace_episodic_memory_v1",
+    "semantic_memory": "healthtrace_semantic_memory_v1",
 }
 
 
@@ -71,7 +79,13 @@ class MilvusStore:
         env_name = COLLECTION_ENV_BY_KIND.get(kind)
         collection = os.getenv(env_name, "") if env_name else ""
         if not collection:
-            collection = os.getenv("MILVUS_COLLECTION", "med_medical_qa")
+            if kind == "medical_qa":
+                collection = os.getenv(
+                    "MILVUS_COLLECTION",
+                    COLLECTION_DEFAULT_BY_KIND["medical_qa"],
+                )
+            else:
+                collection = COLLECTION_DEFAULT_BY_KIND.get(kind, f"healthtrace_{kind}_v1")
         return cls.for_collection(collection)
 
     @property
@@ -114,6 +128,11 @@ class MilvusStore:
         schema.add_field("parent_chunk_id", DataType.VARCHAR, max_length=512)
         schema.add_field("root_chunk_id", DataType.VARCHAR, max_length=512)
         schema.add_field("chunk_level", DataType.INT64)
+        schema.add_field("document_id", DataType.VARCHAR, max_length=64)
+        schema.add_field("document_domain", DataType.VARCHAR, max_length=32)
+        schema.add_field("tenant_id", DataType.VARCHAR, max_length=64)
+        schema.add_field("patient_id", DataType.VARCHAR, max_length=64)
+        schema.add_field("owner_user_id", DataType.INT64)
 
         bm25_function = Function(
             name="text_bm25_emb",
@@ -245,6 +264,11 @@ class MilvusStore:
             "root_chunk_id",
             "chunk_level",
             "chunk_idx",
+            "document_id",
+            "document_domain",
+            "tenant_id",
+            "patient_id",
+            "owner_user_id",
         ]
         dense_search = AnnSearchRequest(
             data=[dense_embedding],
@@ -286,6 +310,11 @@ class MilvusStore:
                     "root_chunk_id": hit.get("root_chunk_id", ""),
                     "chunk_level": hit.get("chunk_level", 0),
                     "chunk_idx": hit.get("chunk_idx", 0),
+                    "document_id": hit.get("document_id", ""),
+                    "document_domain": hit.get("document_domain", ""),
+                    "tenant_id": hit.get("tenant_id", ""),
+                    "patient_id": hit.get("patient_id", ""),
+                    "owner_user_id": hit.get("owner_user_id", 0),
                     "chunk_kind": hit.get("chunk_kind", ""),
                     "structure_type": hit.get("structure_type", ""),
                     "section_path": hit.get("section_path", ""),
@@ -318,6 +347,11 @@ class MilvusStore:
                     "root_chunk_id",
                     "chunk_level",
                     "chunk_idx",
+                    "document_id",
+                    "document_domain",
+                    "tenant_id",
+                    "patient_id",
+                    "owner_user_id",
                     "chunk_kind",
                     "structure_type",
                     "section_path",
@@ -342,6 +376,11 @@ class MilvusStore:
                     "root_chunk_id": hit.get("entity", {}).get("root_chunk_id", ""),
                     "chunk_level": hit.get("entity", {}).get("chunk_level", 0),
                     "chunk_idx": hit.get("entity", {}).get("chunk_idx", 0),
+                    "document_id": hit.get("entity", {}).get("document_id", ""),
+                    "document_domain": hit.get("entity", {}).get("document_domain", ""),
+                    "tenant_id": hit.get("entity", {}).get("tenant_id", ""),
+                    "patient_id": hit.get("entity", {}).get("patient_id", ""),
+                    "owner_user_id": hit.get("entity", {}).get("owner_user_id", 0),
                     "chunk_kind": hit.get("entity", {}).get("chunk_kind", ""),
                     "structure_type": hit.get("entity", {}).get("structure_type", ""),
                     "section_path": hit.get("entity", {}).get("section_path", ""),
@@ -374,6 +413,11 @@ class MilvusStore:
                     "root_chunk_id",
                     "chunk_level",
                     "chunk_idx",
+                    "document_id",
+                    "document_domain",
+                    "tenant_id",
+                    "patient_id",
+                    "owner_user_id",
                     "chunk_kind",
                     "structure_type",
                     "section_path",
@@ -399,6 +443,11 @@ class MilvusStore:
                     "root_chunk_id": entity.get("root_chunk_id", ""),
                     "chunk_level": entity.get("chunk_level", 0),
                     "chunk_idx": entity.get("chunk_idx", 0),
+                    "document_id": entity.get("document_id", ""),
+                    "document_domain": entity.get("document_domain", ""),
+                    "tenant_id": entity.get("tenant_id", ""),
+                    "patient_id": entity.get("patient_id", ""),
+                    "owner_user_id": entity.get("owner_user_id", 0),
                     "chunk_kind": entity.get("chunk_kind", ""),
                     "structure_type": entity.get("structure_type", ""),
                     "section_path": entity.get("section_path", ""),

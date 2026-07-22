@@ -48,6 +48,11 @@ class MilvusWriter:
                         "section_path": doc.get("section_path", ""),
                         "source_dataset": doc.get("source_dataset", ""),
                         "qa_question": doc.get("qa_question", ""),
+                        "document_id": doc.get("document_id", ""),
+                        "document_domain": doc.get("document_domain", "public_medical"),
+                        "tenant_id": doc.get("tenant_id", ""),
+                        "patient_id": doc.get("patient_id", ""),
+                        "owner_user_id": int(doc.get("owner_user_id", 0) or 0),
                     }
                     for doc, dense_emb in zip(batch, dense_embeddings)
                 ]

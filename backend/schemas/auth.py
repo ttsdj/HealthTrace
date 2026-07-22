@@ -20,8 +20,12 @@ class AuthResponse(BaseModel):
     token_type: str = "bearer"
     username: str
     role: str
+    tenant_id: Optional[str] = None
+    patient_id: Optional[str] = None
 
 
 class CurrentUserResponse(BaseModel):
     username: str
     role: str
+    tenant_id: Optional[str] = None
+    patient_id: Optional[str] = None

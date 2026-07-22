@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from backend.indexing.embedding import embedding_service
 from backend.indexing.milvus_client import MilvusStore, get_milvus_store
 from backend.indexing.milvus_writer import MilvusWriter
+from backend.db.models import User
+from backend.infra.database import SessionLocal
+from backend.patient.scope import PatientScope, ensure_user_scope
 
 
 SEMANTIC_MARKERS = (
@@ -62,6 +65,7 @@ class MemoryService:
         user_id: str,
         session_id: str,
         memory_type: str,
+        scope: PatientScope | None = None,
     ) -> dict:
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         chunk_id = f"{memory_type}:{user_id}:{session_id}:{now}"
@@ -80,16 +84,40 @@ class MemoryService:
             "session_id": str(session_id),
             "memory_type": memory_type,
             "created_at": now,
+            "verification_status": "candidate_unconfirmed",
+            "document_domain": "patient_memory",
+            "tenant_id": scope.tenant_id if scope else "",
+            "patient_id": scope.patient_id if scope else "",
+            "owner_user_id": scope.user_id if scope else 0,
         }
 
+    @staticmethod
+    def _resolve_scope(user_id: str) -> PatientScope | None:
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.username == user_id).first()
+            if user is None:
+                return None
+            scope = ensure_user_scope(db, user)
+            db.commit()
+            return scope
+        except Exception:
+            db.rollback()
+            return None
+        finally:
+            db.close()
+
     def store_turn(self, user_id: str, session_id: str, user_text: str, ai_response: str) -> None:
+        scope = self._resolve_scope(user_id)
+        if scope is None:
+            return
         episode = (
             f"用户 {user_id} 在会话 {session_id} 中提问：{user_text}\n"
             f"系统回答摘要：{ai_response[:800]}"
         )
         try:
             self.episodic_writer.write_documents([
-                self._memory_doc(episode, user_id, session_id, "episodic_memory")
+                self._memory_doc(episode, user_id, session_id, "episodic_memory", scope)
             ])
         except Exception as exc:
             print(f"Episodic memory write error: {exc}")
@@ -98,7 +126,7 @@ class MemoryService:
             semantic = f"用户 {user_id} 的长期医疗相关事实或偏好：{user_text}"
             try:
                 self.semantic_writer.write_documents([
-                    self._memory_doc(semantic, user_id, session_id, "semantic_memory")
+                    self._memory_doc(semantic, user_id, session_id, "semantic_memory", scope)
                 ])
             except Exception as exc:
                 print(f"Semantic memory write error: {exc}")
@@ -111,8 +139,15 @@ class MemoryService:
         top_k: int = 3,
     ) -> dict[str, list[dict]]:
         del session_id  # Reserved for an optional same-session boost/reranker.
+        scope = self._resolve_scope(user_id)
+        if scope is None:
+            return {"episodic_memory": [], "semantic_memory": []}
         dense = embedding_service.get_embeddings([query])[0]
-        user_filter = f'user_id == "{_escape_filter_value(user_id)}"'
+        user_filter = (
+            f'user_id == "{_escape_filter_value(user_id)}" and '
+            f'tenant_id == "{_escape_filter_value(scope.tenant_id)}" and '
+            f'patient_id == "{_escape_filter_value(scope.patient_id)}"'
+        )
         return {
             "episodic_memory": self._hybrid(
                 self.episodic_store, dense, query, top_k, user_filter
@@ -153,7 +188,9 @@ class MemoryService:
                 continue
             lines.append(f"【{labels.get(key, key)}】")
             for idx, doc in enumerate(docs, 1):
-                lines.append(f"{idx}. {doc.get('text', '')[:500]}")
+                lines.append(
+                    f"{idx}. [未核验记忆，仅作上下文线索] {doc.get('text', '')[:500]}"
+                )
         return "\n".join(lines)
 
 

@@ -12,6 +12,7 @@ from backend.chat.rag_context import get_last_rag_context
 from backend.chat.streaming import set_rag_step_queue
 from backend.memory import memory_service
 from backend.medical_nlp.safety import analyze_medical_safety, redact_sensitive_text
+from backend.patient.context import build_verified_patient_context
 from backend.rag.context_compression import summarize_history_window
 from backend.tools import reset_knowledge_tool_calls
 
@@ -272,6 +273,13 @@ def chat_with_agent(
         memory_hits = {}
         memory_note = ""
 
+    patient_context, patient_context_meta = build_verified_patient_context(
+        user_id, redacted_user_text
+    )
+    trace_base.update(patient_context_meta)
+    if patient_context:
+        memory_note = f"{patient_context}\n{memory_note}".strip()
+
     if trace_base.get("safety_notice"):
         memory_note = f"【医疗安全边界】{trace_base['safety_notice']}\n{memory_note}".strip()
     context_messages = _build_context_messages(
@@ -402,6 +410,13 @@ async def chat_with_agent_stream(
         print(f"Memory retrieval error: {e}")
         memory_hits = {}
         memory_note = ""
+
+    patient_context, patient_context_meta = build_verified_patient_context(
+        user_id, redacted_user_text
+    )
+    trace_base.update(patient_context_meta)
+    if patient_context:
+        memory_note = f"{patient_context}\n{memory_note}".strip()
 
     if trace_base.get("safety_notice"):
         memory_note = f"【医疗安全边界】{trace_base['safety_notice']}\n{memory_note}".strip()

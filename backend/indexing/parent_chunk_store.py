@@ -23,6 +23,11 @@ class ParentChunkStore:
             "root_chunk_id": item.root_chunk_id,
             "chunk_level": item.chunk_level,
             "chunk_idx": item.chunk_idx,
+            "document_id": item.document_id,
+            "document_domain": item.document_domain,
+            "tenant_id": item.tenant_id,
+            "patient_id": item.patient_id,
+            "owner_user_id": item.owner_user_id,
         }
 
     @staticmethod
@@ -53,6 +58,11 @@ class ParentChunkStore:
                     "root_chunk_id": doc.get("root_chunk_id", ""),
                     "chunk_level": int(doc.get("chunk_level", 0) or 0),
                     "chunk_idx": int(doc.get("chunk_idx", 0) or 0),
+                    "document_id": doc.get("document_id", ""),
+                    "document_domain": doc.get("document_domain", "public_medical"),
+                    "tenant_id": doc.get("tenant_id") or None,
+                    "patient_id": doc.get("patient_id") or None,
+                    "owner_user_id": doc.get("owner_user_id") or None,
                     "updated_at": datetime.utcnow(),
                 }
                 cache_payload = {
@@ -66,6 +76,11 @@ class ParentChunkStore:
                     "root_chunk_id": payload["root_chunk_id"],
                     "chunk_level": payload["chunk_level"],
                     "chunk_idx": payload["chunk_idx"],
+                    "document_id": payload["document_id"],
+                    "document_domain": payload["document_domain"],
+                    "tenant_id": payload["tenant_id"],
+                    "patient_id": payload["patient_id"],
+                    "owner_user_id": payload["owner_user_id"],
                 }
                 if record:
                     for key, value in payload.items():
@@ -82,7 +97,12 @@ class ParentChunkStore:
 
         return upserted
 
-    def get_documents_by_ids(self, chunk_ids: List[str]) -> List[dict]:
+    def get_documents_by_ids(
+        self,
+        chunk_ids: List[str],
+        tenant_id: str | None = None,
+        patient_id: str | None = None,
+    ) -> List[dict]:
         if not chunk_ids:
             return []
 
@@ -93,7 +113,14 @@ class ParentChunkStore:
             if not key:
                 continue
             cached = cache.get_json(self._cache_key(key))
-            if cached:
+            cache_matches_scope = cached and (
+                tenant_id is None
+                or (
+                    cached.get("tenant_id") == tenant_id
+                    and cached.get("patient_id") == patient_id
+                )
+            )
+            if cache_matches_scope:
                 ordered_results[key] = cached
             else:
                 missing_ids.append(key)
@@ -101,7 +128,13 @@ class ParentChunkStore:
         if missing_ids:
             db = SessionLocal()
             try:
-                rows = db.query(ParentChunk).filter(ParentChunk.chunk_id.in_(missing_ids)).all()
+                query = db.query(ParentChunk).filter(ParentChunk.chunk_id.in_(missing_ids))
+                if tenant_id is not None:
+                    query = query.filter(
+                        ParentChunk.tenant_id == tenant_id,
+                        ParentChunk.patient_id == patient_id,
+                    )
+                rows = query.all()
                 for row in rows:
                     payload = self._to_dict(row)
                     ordered_results[row.chunk_id] = payload
@@ -127,5 +160,41 @@ class ParentChunkStore:
                 for chunk_id in chunk_ids:
                     cache.delete(self._cache_key(chunk_id))
             return deleted
+        finally:
+            db.close()
+
+    def delete_by_document_id(
+        self,
+        document_id: str,
+        tenant_id: str,
+        patient_id: str,
+    ) -> int:
+        """Delete one patient document's parent chunks after scope verification."""
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(ParentChunk)
+                .filter(
+                    ParentChunk.document_id == document_id,
+                    ParentChunk.tenant_id == tenant_id,
+                    ParentChunk.patient_id == patient_id,
+                )
+                .all()
+            )
+            chunk_ids = [row.chunk_id for row in rows]
+            if chunk_ids:
+                (
+                    db.query(ParentChunk)
+                    .filter(
+                        ParentChunk.document_id == document_id,
+                        ParentChunk.tenant_id == tenant_id,
+                        ParentChunk.patient_id == patient_id,
+                    )
+                    .delete(synchronize_session=False)
+                )
+                db.commit()
+                for chunk_id in chunk_ids:
+                    cache.delete(self._cache_key(chunk_id))
+            return len(chunk_ids)
         finally:
             db.close()

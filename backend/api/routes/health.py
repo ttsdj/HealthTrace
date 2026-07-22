@@ -29,8 +29,19 @@ def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
 
 
 def _check_postgres() -> dict:
+    database_url = os.getenv("DATABASE_URL", "")
+    if database_url.startswith("sqlite:"):
+        try:
+            db = SessionLocal()
+            try:
+                db.execute(text("SELECT 1"))
+            finally:
+                db.close()
+            return {"ok": True, "dialect": "sqlite"}
+        except Exception as exc:
+            return {"ok": False, "dialect": "sqlite", "error": str(exc)}
     host, port = _connection_target(
-        os.getenv("DATABASE_URL", ""), "127.0.0.1", 5432
+        database_url, "127.0.0.1", 5432
     )
     if not _port_open(host, port):
         return {"ok": False, "error": f"postgres {host}:{port} is not reachable"}
@@ -117,6 +128,34 @@ def _check_llm_config() -> dict:
     }
 
 
+def _patient_capabilities() -> dict:
+    migration_status = "unknown"
+    try:
+        from backend.db.models import SchemaMigration
+        from backend.infra.migrations import PHASE1_VERSION
+
+        db = SessionLocal()
+        try:
+            record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE1_VERSION).first()
+            migration_status = record.status if record else "not_applied"
+        finally:
+            db.close()
+    except Exception:
+        migration_status = "unavailable"
+    return {
+        "patient_domains_enabled": os.getenv(
+            "HEALTHTRACE_PATIENT_DOMAIN_ENABLED", "true"
+        ).lower()
+        == "true",
+        "phase1_migration": migration_status,
+        "task_scheduler_enabled": os.getenv(
+            "HEALTHTRACE_TASK_SCHEDULER_ENABLED", "true"
+        ).lower()
+        == "true",
+        "multimodal_retrieval_enabled": False,
+    }
+
+
 @router.get("/health")
 async def health():
     core_services = {
@@ -137,4 +176,5 @@ async def health():
         "services": {**core_services, **optional_services},
         "core_services": core_services,
         "optional_services": optional_services,
+        "capabilities": _patient_capabilities(),
     }

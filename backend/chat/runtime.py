@@ -16,21 +16,13 @@ FAST_MODEL = os.getenv("FAST_MODEL") or MODEL
 BASE_URL = os.getenv("BASE_URL")
 
 
-def _mask_secret(value: str | None) -> str:
-    if not value:
-        return "<missing>"
-    if len(value) <= 10:
-        return "<set>"
-    return f"{value[:6]}...{value[-4:]}"
-
-
 def _log_llm_config() -> None:
     print(
         "[HealthTrace LLM] "
         f"model={MODEL or '<missing>'}, "
         f"fast_model={FAST_MODEL or '<missing>'}, "
         f"base_url={BASE_URL or '<missing>'}, "
-        f"api_key={_mask_secret(API_KEY)}"
+        f"api_key_set={bool(API_KEY)}"
     )
 
 SYSTEM_PROMPT = (

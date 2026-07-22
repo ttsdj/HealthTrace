@@ -2,8 +2,7 @@ from langchain_core.tools import tool
 
 from backend.chat.rag_context import record_rag_context
 from backend.kg import search_medical_kg_text
-from backend.rag.fusion import format_retrieval_context
-from backend.rag.pipeline import run_rag_graph
+from backend.tools.medical_retrieval import format_evidence_bundle, retrieve_public_medical_evidence
 
 _KNOWLEDGE_TOOL_CALLS_THIS_TURN = 0
 
@@ -31,36 +30,16 @@ def search_knowledge_base(query: str) -> str:
             "Use the existing retrieval result and provide the final answer directly."
         )
 
-    try:
-        rag_result = run_rag_graph(query)
-    except Exception as exc:
-        record_rag_context(
-            {
-                "tool_used": True,
-                "tool_name": "search_knowledge_base",
-                "retrieval_degraded": True,
-                "retrieval_failure_reason": str(exc)[:300],
-                "retrieval_mode": "unavailable",
-                "retrieval_attempts": [
-                    {"mode": "rag_graph", "status": "error", "error": str(exc)[:200]}
-                ],
-                "recall_count": 0,
-            }
-        )
+    bundle, rag_trace = retrieve_public_medical_evidence(query)
+    record_rag_context(rag_trace)
+    if bundle.status == "unavailable":
         return (
             "Medical vector retrieval is temporarily unavailable. "
             "Proceed with conservative general medical knowledge, clearly state that retrieved evidence was unavailable, "
             "and avoid definitive diagnosis or prescription-level advice."
         )
 
-    docs = rag_result.get("docs", []) if isinstance(rag_result, dict) else []
-    rag_trace = rag_result.get("rag_trace", {}) if isinstance(rag_result, dict) else {}
-    record_rag_context(rag_trace)
-
-    if not docs:
-        return "No relevant documents found in the knowledge base."
-
-    return "Retrieved Medical Vector Evidence:\n" + format_retrieval_context(docs)
+    return "Retrieved Medical Vector Evidence:\n" + format_evidence_bundle(bundle)
 
 
 @tool("search_medical_kg")

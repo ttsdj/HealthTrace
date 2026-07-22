@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.api import router
 from backend.infra.database import init_db
+from backend.tasks.scheduler import start_health_task_scheduler, stop_health_task_scheduler
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
 
@@ -32,6 +33,11 @@ def create_app() -> FastAPI:
             if os.getenv("STRICT_STARTUP", "false").lower() == "true":
                 raise
             print(f"Database startup initialization skipped: {exc}")
+        start_health_task_scheduler()
+
+    @app.on_event("shutdown")
+    async def _shutdown_task_scheduler():
+        await stop_health_task_scheduler()
 
     app.add_middleware(
         CORSMiddleware,

@@ -85,3 +85,7 @@ def init_db() -> None:
     import backend.db.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    if os.getenv("HEALTHTRACE_AUTO_MIGRATE", "false").lower() == "true":
+        from backend.infra.migrations import apply_phase1_migration
+
+        apply_phase1_migration(engine)

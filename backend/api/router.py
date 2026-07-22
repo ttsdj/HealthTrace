@@ -8,6 +8,9 @@ from backend.api.routes import (
     documents,
     evaluation,
     health,
+    health_records,
+    health_tasks,
+    patient_documents,
     sessions,
 )
 
@@ -20,3 +23,6 @@ router.include_router(documents.router)
 router.include_router(collections.router)
 router.include_router(evaluation.router)
 router.include_router(health.router)
+router.include_router(health_records.router)
+router.include_router(health_tasks.router)
+router.include_router(patient_documents.router)
