@@ -21,6 +21,7 @@
 | Typed Patient Tools | PARTIAL | `backend/patient/tools.py` | 读取事实/时间轴和提醒草稿已实现；趋势计算等接口仍保留为 unavailable |
 | 长期健康任务 | PARTIAL | `health_tasks`、`health_task_runs`、scheduler 与 API | 幂等、确认、取消和跨会话恢复已实现；外部通知渠道尚未实现 |
 | LangGraph RAG 图 | IMPLEMENTED | `backend/rag/pipeline.py` 的 `build_rag_graph` 与子图 | 这是检索图，不是完整 Health Agent 咨询状态机 |
+| 咨询 Orchestrator | PARTIAL | `backend/agent/planner.py`、`chat/service.py` | 高风险旁路、缺失字段追问和 Evidence State 已接入；动态患者工具规划尚未完成 |
 | Recent Messages | IMPLEMENTED | `backend/rag/context_compression.py`、`backend/chat/service.py` | 窗口策略较简单 |
 | Persistent Note | PARTIAL | `backend/chat/service.py` 的笔记生成与注入 | LLM 摘要未结构化、无事实可信状态 |
 | 语义/情景记忆 | PARTIAL | `backend/memory/service.py`、两类 Milvus collection | 已强制 tenant/patient 过滤并标记未核验；仍缺过期、确认和撤回流程 |
@@ -65,7 +66,7 @@ System Prompt
 → 工具返回的向量/KG/导航证据
 ```
 
-当前已有规则版 `required_patient_fields` 和受控患者工具，但尚未接入完整咨询 Orchestrator、Missing Information Checker 与 Action Policy。
+当前已有规则版 `required_patient_fields`、受控患者工具、确定性高风险旁路和 Evidence State；尚未完成动态患者工具规划、完整 Missing Information Checker 与全部 Action Policy。
 
 ## 当前数据结构
 
@@ -73,7 +74,7 @@ PostgreSQL 已增加 tenant、patient、document、FHIR-like fact、timeline、h
 
 ## 测试覆盖判断
 
-迁移前基线为 35 项，Phase 0 为 39 项；当前为 55 项通过。新增覆盖加法迁移/无损回滚、跨患者文档与事实隔离、临床时间轴、工具合约、任务幂等，以及认证后的事实→时间轴→任务 HTTP 流程。缺口包括真实 PostgreSQL/Milvus 集成迁移、安全攻击集、真实 OCR 准确率和完整 Health Agent 状态决策。
+迁移前基线为 35 项，Phase 0 为 39 项；当前为 60 项通过。新增覆盖加法迁移/无损回滚、跨患者文档与事实隔离、临床时间轴、工具合约、任务幂等、认证 HTTP 流程、咨询预检和高风险 LLM 旁路。缺口包括真实 PostgreSQL/Milvus 集成迁移、安全攻击集、真实 OCR 准确率和完整 Health Agent 状态决策。
 
 ## 下一步
 
