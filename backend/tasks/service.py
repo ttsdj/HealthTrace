@@ -354,6 +354,10 @@ def _create_notification(
         dedup_key=dedup_key,
     )
     db.add(notification)
+    db.flush()
+    from backend.tasks.notifications import create_external_deliveries
+
+    create_external_deliveries(db, notification, task)
     return notification
 
 

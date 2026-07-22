@@ -42,3 +42,8 @@ Thumbs.db
 
 # Frontend build output
 frontend/dist/
+
+# Tests and evaluation source are not required in the runtime image
+tests/
+evaluation/
+.github/

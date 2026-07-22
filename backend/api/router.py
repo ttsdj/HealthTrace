@@ -11,6 +11,7 @@ from backend.api.routes import (
     health,
     health_records,
     health_tasks,
+    observability,
     patient_documents,
     sessions,
 )
@@ -27,4 +28,5 @@ router.include_router(fact_candidates.router)
 router.include_router(health.router)
 router.include_router(health_records.router)
 router.include_router(health_tasks.router)
+router.include_router(observability.router)
 router.include_router(patient_documents.router)

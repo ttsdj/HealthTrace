@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import os
 
-from backend.db.models import DocumentRecord, User
+from backend.db.models import User
 from backend.infra.database import SessionLocal
-from backend.patient.facts import list_patient_facts
+from backend.patient.planner import plan_patient_tool_calls
 from backend.patient.retrieval import retrieve_patient_records
 from backend.patient.scope import ensure_user_scope
+from backend.patient.tools import PatientTools
 
 _PERSONAL_MARKERS = ("我", "我的", "本人", "结合病历", "结合报告", "结合我的")
 
@@ -33,7 +34,7 @@ def required_resource_types(query: str) -> list[str]:
 
 
 def build_verified_patient_context(username: str, query: str) -> tuple[str, dict]:
-    """Read only the minimum patient facts needed for a personal query."""
+    """Build minimum verified patient context through constrained typed tools."""
     if not should_query_patient_context(query):
         return "", {"patient_context_accessed": False, "reason": "general_query"}
 
@@ -45,57 +46,81 @@ def build_verified_patient_context(username: str, query: str) -> tuple[str, dict
         scope = ensure_user_scope(db, user)
         db.commit()
         resource_types = required_resource_types(query)
-        facts = []
-        if resource_types:
-            for resource_type in resource_types:
-                facts.extend(list_patient_facts(db, scope, resource_type))
-        else:
-            facts = list_patient_facts(db, scope)[:10]
-
-        facts = [item for item in facts if item.verification_status != "model_inferred"]
-        indexed_document_exists = (
-            db.query(DocumentRecord.id)
-            .filter(
-                DocumentRecord.document_domain == "patient_private",
-                DocumentRecord.tenant_id == scope.tenant_id,
-                DocumentRecord.patient_id == scope.patient_id,
-                DocumentRecord.owner_user_id == scope.user_id,
-                DocumentRecord.status == "indexed",
-            )
-            .first()
-            is not None
-        )
-        patient_record_result = {"docs": [], "mode": "not_requested", "attempts": []}
-        if indexed_document_exists:
+        planned_calls = plan_patient_tool_calls(query)
+        tools = PatientTools(db, scope, record_retriever=retrieve_patient_records)
+        results = []
+        for call in planned_calls:
+            method = getattr(tools, call.tool_name, None)
+            if method is None:
+                continue
             try:
-                patient_record_result = retrieve_patient_records(query, scope, top_k=3)
+                result = method(**call.arguments)
             except Exception as exc:
-                patient_record_result = {
-                    "docs": [],
-                    "mode": "unavailable",
-                    "attempts": [
-                        {
-                            "mode": "patient_record",
-                            "status": "error",
-                            "error": str(exc)[:200],
-                        }
-                    ],
-                }
+                from backend.tools.contracts import PatientToolResult
+
+                result = PatientToolResult(
+                    tool_name=call.tool_name,
+                    status="error",
+                    error=str(exc)[:300],
+                )
+            results.append(result)
 
         max_chars = max(500, int(os.getenv("PATIENT_CONTEXT_MAX_CHARS", "3000")))
         sections: list[str] = []
-        if facts:
-            fact_lines = ["【患者结构化事实：按来源核验后使用】"]
-            for item in facts:
-                effective = item.effective_start.isoformat() if item.effective_start else "时间未知"
-                rendered = f"；值={item.value_json}" if item.value_json else ""
+        fact_rows = [
+            item
+            for result in results
+            if result.tool_name
+            in {
+                "get_patient_allergies",
+                "get_current_medications",
+                "get_recent_conditions",
+                "get_latest_observations",
+            }
+            for item in result.data
+        ]
+        if fact_rows:
+            fact_lines = ["【患者结构化事实：仅包含用户或临床人员已确认的数据】"]
+            for item in fact_rows:
                 fact_lines.append(
-                    f"- {item.resource_type}: {item.display}{rendered}；时间={effective}；"
-                    f"状态={item.verification_status}；来源={item.source_type}"
+                    f"- {item['resource_type']}: {item['display']}；值={item.get('value') or {}}；"
+                    f"时间={item.get('effective_start') or '时间未知'}；"
+                    f"状态={item['verification_status']}；来源={item['source_type']}"
                 )
             sections.append("\n".join(fact_lines))
 
-        record_docs = patient_record_result.get("docs") or []
+        timeline_rows = [
+            item
+            for result in results
+            if result.tool_name == "get_patient_timeline"
+            for item in result.data
+        ]
+        if timeline_rows:
+            lines = ["【患者健康时间线：仅包含已确认事件】"]
+            for item in timeline_rows[:10]:
+                lines.append(f"- {item['effective_at']}: {item['title']}；{item['summary']}")
+            sections.append("\n".join(lines))
+
+        trend_rows = [
+            item
+            for result in results
+            if result.tool_name == "get_observation_trend"
+            for item in result.data
+        ]
+        if trend_rows:
+            trend = trend_rows[0]
+            sections.append(
+                "【患者指标趋势：仅用于辅助判断，不构成诊断】\n"
+                f"- {trend['code']}({trend['metric']}): {trend['direction']}；"
+                f"首值={trend.get('first')}；末值={trend.get('latest')}；"
+                f"样本数={trend['count']}；单位={trend.get('unit', '')}"
+            )
+
+        record_result = next(
+            (result for result in results if result.tool_name == "search_patient_record_text"),
+            None,
+        )
+        record_docs = record_result.data if record_result else []
         if record_docs:
             record_lines = [
                 "【患者私有文档检索证据：仅作来源证据，未结构化核验，不得直接当作确诊事实】"
@@ -111,11 +136,36 @@ def build_verified_patient_context(username: str, query: str) -> tuple[str, dict
         return context, {
             "patient_context_accessed": True,
             "required_patient_fields": resource_types,
-            "patient_fact_count": len(facts),
-            "patient_record_accessed": indexed_document_exists,
+            "patient_fact_count": len(fact_rows),
+            "patient_record_accessed": record_result is not None,
             "patient_record_hits": len(record_docs),
-            "patient_record_mode": patient_record_result.get("mode", "not_requested"),
-            "patient_record_attempts": patient_record_result.get("attempts", []),
+            "patient_record_mode": (
+                record_result.metadata.get("mode", "retrieved")
+                if record_result and record_result.status in {"ok", "empty"}
+                else "unavailable"
+                if record_result and record_result.status == "error"
+                else "not_requested"
+            ),
+            "patient_record_attempts": (
+                record_result.metadata.get("attempts", []) if record_result else []
+            ),
+            "patient_tool_plan": [
+                {
+                    "tool_name": call.tool_name,
+                    "arguments": call.arguments,
+                    "reason": call.reason,
+                }
+                for call in planned_calls
+            ],
+            "patient_tool_results": [
+                {
+                    "tool_name": result.tool_name,
+                    "status": result.status,
+                    "count": len(result.data),
+                    "error": result.error,
+                }
+                for result in results
+            ],
             "patient_context_chars": len(context),
         }
     except Exception as exc:

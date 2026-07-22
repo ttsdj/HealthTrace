@@ -90,3 +90,15 @@ HEALTHTRACE_INFRA_MODE=external
 - 前端：健康任务页展示目标、通知、五类任务和运行记录，支持确认、取消、重试、补录与归档。
 - 真实迁移：已在 `medretrieve_v2` PostgreSQL 执行，只新增 11 个列、索引和 `health_notifications` 表，未删除旧数据。
 - 验证：后端 79 项测试通过，`npm run build` 通过；新增覆盖故障注入、跨患者通知隔离和 Phase 3 幂等迁移。
+
+## 2026-07-22 Agent 评测、趋势、可观测性与通知投递
+
+- 迁移版本：`2026_07_22_phase4_notification_delivery`。
+- 迁移前备份：`data/backups/healthtrace-before-phase4-20260722.dump`，custom format，已通过 `pg_restore -l` 校验；SHA-256 为 `4EF26910595357D68DADA0CFE1DD025E3D7E7E2F854677B2E3F529E8E9FA1E21`。
+- 新表：`health_notification_deliveries`；没有删除、重命名或回填既有业务表。
+- Patient Tools：新增 Observation 趋势与白名单工具规划；默认规则模式，可选受约束 LLM，任何模型/解析失败回退规则。
+- Agent 评测：42 条人工规则策略集覆盖高风险、缺失信息、证据源、工具路由、隐私和边界，当前 42/42 通过；该结果不代表临床答案准确率。
+- 可观测性：管理员聚合查看证据状态、检索降级、工具成功率/延迟、任务重试和 ragas_lite 信号；接口不返回问题、回答和患者标识。
+- 外部通知：站内通知先提交，邮件/Webhook 后投递；显式同意、幂等、指数退避，外部失败不会回滚任务。
+- 验证：后端 90 项测试通过，前端 TypeScript/Vite 构建通过，桌面和 390×844 移动视口通过，真实 `/health` 为 `ready=true`；Neo4j 保持可选降级。
+- 容器化：Compose 合并配置通过；应用镜像构建被本机 Docker 腾讯镜像源 EOF 阻塞，未发现 Dockerfile 语法错误，需修复 Docker Desktop registry mirror 后重试。

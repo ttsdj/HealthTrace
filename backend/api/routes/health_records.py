@@ -9,12 +9,14 @@ from backend.patient.facts import (
     retract_patient_fact,
 )
 from backend.patient.scope import PatientScope, get_current_patient_scope
+from backend.patient.trends import calculate_observation_trend
 from backend.schemas.health_records import (
     FactRetractionResponse,
     PatientFactCreate,
     PatientFactListResponse,
     PatientFactResponse,
     PatientTimelineResponse,
+    ObservationTrendResponse,
     TimelineEventResponse,
 )
 
@@ -122,4 +124,17 @@ async def timeline(
             )
             for item in events
         ]
+    )
+
+
+@router.get("/observations/trends/{code}", response_model=ObservationTrendResponse)
+async def observation_trend(
+    code: str,
+    metric: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    scope: PatientScope = Depends(get_current_patient_scope),
+    db: Session = Depends(get_db),
+):
+    return ObservationTrendResponse(
+        **calculate_observation_trend(db, scope, code, metric=metric, limit=limit)
     )

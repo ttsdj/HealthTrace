@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from backend.db.models import HealthNotificationDelivery
 from backend.infra.auth import get_db
 from backend.patient.scope import PatientScope, get_current_patient_scope
 from backend.schemas.tasks import (
@@ -10,6 +11,7 @@ from backend.schemas.tasks import (
     HealthGoalResponse,
     HealthNotificationListResponse,
     HealthNotificationResponse,
+    HealthNotificationDeliveryResponse,
     HealthTaskCreate,
     HealthTaskListResponse,
     HealthTaskResponse,
@@ -68,7 +70,12 @@ def _goal_response(goal, created: bool = False) -> HealthGoalResponse:
     )
 
 
-def _notification_response(item) -> HealthNotificationResponse:
+def _notification_response(item, db: Session) -> HealthNotificationResponse:
+    deliveries = db.query(HealthNotificationDelivery).filter(
+        HealthNotificationDelivery.notification_id == item.id,
+        HealthNotificationDelivery.tenant_id == item.tenant_id,
+        HealthNotificationDelivery.patient_id == item.patient_id,
+    ).order_by(HealthNotificationDelivery.channel.asc()).all()
     return HealthNotificationResponse(
         notification_id=item.id,
         notification_type=item.notification_type,
@@ -80,6 +87,20 @@ def _notification_response(item) -> HealthNotificationResponse:
         payload=item.payload_json,
         created_at=item.created_at,
         read_at=item.read_at,
+        deliveries=[
+            HealthNotificationDeliveryResponse(
+                delivery_id=delivery.id,
+                channel=delivery.channel,
+                recipient_hint=delivery.recipient_hint,
+                status=delivery.status,
+                attempt_count=delivery.attempt_count,
+                max_attempts=delivery.max_attempts,
+                next_retry_at=delivery.next_retry_at,
+                error_message=delivery.error_message,
+                delivered_at=delivery.delivered_at,
+            )
+            for delivery in deliveries
+        ],
     )
 
 
@@ -243,7 +264,7 @@ async def list_notifications(
 ):
     notifications = HealthTaskService(db, scope).list_notifications(unread_only)
     return HealthNotificationListResponse(
-        notifications=[_notification_response(item) for item in notifications]
+        notifications=[_notification_response(item, db) for item in notifications]
     )
 
 
@@ -257,4 +278,4 @@ async def mark_notification_read(
     if notification is None:
         raise HTTPException(status_code=404, detail="Health notification not found")
     db.commit()
-    return _notification_response(notification)
+    return _notification_response(notification, db)

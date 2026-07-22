@@ -5,6 +5,7 @@ import os
 
 from backend.infra.database import SessionLocal
 from backend.tasks.service import execute_ready_task_runs, process_due_tasks
+from backend.tasks.notifications import dispatch_pending_deliveries
 
 _scheduler_task: asyncio.Task | None = None
 
@@ -17,6 +18,9 @@ async def _scheduler_loop() -> None:
             process_due_tasks(db)
             execute_ready_task_runs(db)
             db.commit()
+            if os.getenv("HEALTHTRACE_EXTERNAL_NOTIFICATIONS_ENABLED", "false").lower() == "true":
+                dispatch_pending_deliveries(db)
+                db.commit()
         except Exception as exc:
             db.rollback()
             print(f"Health task scheduler tick skipped: {type(exc).__name__}")

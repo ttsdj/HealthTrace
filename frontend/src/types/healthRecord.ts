@@ -113,4 +113,15 @@ export interface HealthNotification {
   payload: Record<string, unknown>;
   created_at: string;
   read_at: string | null;
+  deliveries: Array<{
+    delivery_id: string;
+    channel: string;
+    recipient_hint: string;
+    status: string;
+    attempt_count: number;
+    max_attempts: number;
+    next_retry_at: string | null;
+    error_message: string;
+    delivered_at: string | null;
+  }>;
 }

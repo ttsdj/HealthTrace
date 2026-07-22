@@ -1,0 +1,24 @@
+services:
+  app:
+    container_name: healthtrace-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/healthtrace
+      REDIS_URL: redis://redis:6379/0
+      MILVUS_HOST: standalone
+      MILVUS_PORT: "19530"
+      HEALTHTRACE_INFRA_MODE: managed
+    ports:
+      - "${HEALTHTRACE_BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      standalone:
+        condition: service_healthy
+    restart: unless-stopped

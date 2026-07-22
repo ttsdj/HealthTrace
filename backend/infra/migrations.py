@@ -8,6 +8,7 @@ from sqlalchemy import Engine, inspect, text
 PHASE1_VERSION = "2026_07_22_phase1_document_domains"
 PHASE2_VERSION = "2026_07_22_phase2_fact_candidates"
 PHASE3_VERSION = "2026_07_22_phase3_long_term_tasks"
+PHASE4_VERSION = "2026_07_22_phase4_notification_delivery"
 
 
 def _get_migration_status(engine: Engine, version: str) -> dict:
@@ -39,6 +40,11 @@ def get_phase2_migration_status(engine: Engine) -> dict:
 def get_phase3_migration_status(engine: Engine) -> dict:
     """Read long-term task migration state without mutating the database."""
     return _get_migration_status(engine, PHASE3_VERSION)
+
+
+def get_phase4_migration_status(engine: Engine) -> dict:
+    """Read external notification delivery migration state without mutation."""
+    return _get_migration_status(engine, PHASE4_VERSION)
 
 
 def _add_column_if_missing(conn, table_name: str, column_name: str, ddl: str) -> bool:
@@ -320,3 +326,53 @@ def rollback_phase3_long_term_task_migration(engine: Engine) -> dict:
         }
         db.commit()
     return {"version": PHASE3_VERSION, "status": "rolled_back", "data_preserved": True}
+
+
+def apply_phase4_notification_delivery_migration(engine: Engine) -> dict:
+    """Create additive, independently retryable external notification delivery storage."""
+    from backend.db.models import SchemaMigration
+    from backend.infra.database import Base
+    from sqlalchemy.orm import Session
+
+    existed = inspect(engine).has_table("health_notification_deliveries")
+    Base.metadata.create_all(bind=engine)
+    if not inspect(engine).has_table("health_notification_deliveries"):
+        raise RuntimeError("health_notification_deliveries table was not created")
+    now = datetime.utcnow()
+    changes = [] if existed else ["health_notification_deliveries"]
+    details = {
+        "mode": "additive",
+        "changes": changes,
+        "delivery_channels": ["webhook", "email"],
+        "fallback": "in_app_notification_is_committed_first",
+        "rollback": "disable_external_dispatcher",
+    }
+    with Session(engine) as db:
+        record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE4_VERSION).first()
+        if record is None:
+            db.add(SchemaMigration(version=PHASE4_VERSION, status="applied", details_json=details, applied_at=now, updated_at=now))
+        else:
+            record.status = "applied"
+            record.details_json = details
+            record.updated_at = now
+        db.commit()
+    return {"version": PHASE4_VERSION, "status": "applied", "changes": changes}
+
+
+def rollback_phase4_notification_delivery_migration(engine: Engine) -> dict:
+    """Disable external delivery without dropping notification or delivery history."""
+    status = get_phase4_migration_status(engine)
+    if status["status"] == "not_applied":
+        return {"version": PHASE4_VERSION, "status": "not_applied"}
+    from backend.db.models import SchemaMigration
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as db:
+        record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE4_VERSION).first()
+        if record is None:
+            return {"version": PHASE4_VERSION, "status": "not_applied"}
+        record.status = "rolled_back"
+        record.updated_at = datetime.utcnow()
+        record.details_json = {**(record.details_json or {}), "rollback": "HEALTHTRACE_EXTERNAL_NOTIFICATIONS_ENABLED=false"}
+        db.commit()
+    return {"version": PHASE4_VERSION, "status": "rolled_back", "data_preserved": True}

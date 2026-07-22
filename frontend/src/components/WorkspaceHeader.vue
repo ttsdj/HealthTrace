@@ -27,6 +27,10 @@
         <i class="fas fa-arrow-up-from-bracket"></i>
         <span>导入文档</span>
       </button>
+      <button v-if="authStore.isAdmin" class="toolbar-btn" aria-label="运行监控" :class="{ active: chatStore.activeNav === 'observability' }" @click="openObservability">
+        <i class="fas fa-chart-line"></i>
+        <span>运行监控</span>
+      </button>
     </div>
 
     <div class="workspace-status">
@@ -113,6 +117,11 @@ const openKnowledgeBase = () => {
 
 const openHealthRecord = () => {
   chatStore.activeNav = 'healthRecord';
+  sessionStore.showHistorySidebar = false;
+};
+
+const openObservability = () => {
+  chatStore.activeNav = 'observability';
   sessionStore.showHistorySidebar = false;
 };
 

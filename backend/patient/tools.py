@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from sqlalchemy.orm import Session
 
 from backend.patient.facts import get_patient_timeline, list_patient_facts
 from backend.patient.retrieval import retrieve_patient_records
 from backend.patient.scope import PatientScope
+from backend.patient.trends import calculate_observation_trend
 from backend.tools.contracts import PatientToolResult
 from backend.tasks.service import HealthTaskService
 
@@ -12,9 +15,15 @@ from backend.tasks.service import HealthTaskService
 class PatientTools:
     """Typed patient tools with authorization scope injected by the backend."""
 
-    def __init__(self, db: Session, scope: PatientScope):
+    def __init__(
+        self,
+        db: Session,
+        scope: PatientScope,
+        record_retriever: Callable | None = None,
+    ):
         self._db = db
         self._scope = scope
+        self._record_retriever = record_retriever or retrieve_patient_records
 
     def get_patient_allergies(self) -> PatientToolResult:
         return self._facts("get_patient_allergies", "AllergyIntolerance")
@@ -29,7 +38,11 @@ class PatientTools:
         return self._facts("get_latest_observations", "Observation")
 
     def get_patient_timeline(self, limit: int = 50) -> PatientToolResult:
-        events = get_patient_timeline(self._db, self._scope, limit)
+        events = [
+            item
+            for item in get_patient_timeline(self._db, self._scope, limit)
+            if item.verification_status in {"user_confirmed", "clinician_verified"}
+        ]
         data = [
             {
                 "event_id": item.id,
@@ -51,7 +64,7 @@ class PatientTools:
 
     def search_patient_record_text(self, query: str, top_k: int = 5) -> PatientToolResult:
         try:
-            result = retrieve_patient_records(query, self._scope, top_k)
+            result = self._record_retriever(query, self._scope, top_k)
         except Exception as exc:
             return PatientToolResult(
                 tool_name="search_patient_record_text",
@@ -62,13 +75,30 @@ class PatientTools:
             tool_name="search_patient_record_text",
             status="ok" if result["docs"] else "empty",
             data=result["docs"],
+            metadata={
+                "mode": result.get("mode", "unknown"),
+                "attempts": result.get("attempts", []),
+            },
         )
 
-    def get_observation_trend(self, code: str) -> PatientToolResult:
+    def get_observation_trend(self, code: str, metric: str | None = None) -> PatientToolResult:
+        try:
+            trend = calculate_observation_trend(
+                self._db,
+                self._scope,
+                code,
+                metric=metric,
+            )
+        except Exception as exc:
+            return PatientToolResult(
+                tool_name="get_observation_trend",
+                status="error",
+                error=str(exc)[:300],
+            )
         return PatientToolResult(
             tool_name="get_observation_trend",
-            status="capability_unavailable",
-            error=f"Trend calculation interface is reserved for observation code {code!r}",
+            status="ok" if trend["count"] else "empty",
+            data=[trend],
         )
 
     def create_health_reminder_draft(
@@ -108,7 +138,11 @@ class PatientTools:
         )
 
     def _facts(self, tool_name: str, resource_type: str) -> PatientToolResult:
-        facts = list_patient_facts(self._db, self._scope, resource_type)
+        facts = [
+            item
+            for item in list_patient_facts(self._db, self._scope, resource_type)
+            if item.verification_status in {"user_confirmed", "clinician_verified"}
+        ]
         data = [
             {
                 "fact_id": item.id,

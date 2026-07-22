@@ -94,6 +94,19 @@ class HealthNotificationResponse(BaseModel):
     payload: dict
     created_at: datetime
     read_at: datetime | None
+    deliveries: list["HealthNotificationDeliveryResponse"] = Field(default_factory=list)
+
+
+class HealthNotificationDeliveryResponse(BaseModel):
+    delivery_id: str
+    channel: str
+    recipient_hint: str
+    status: str
+    attempt_count: int
+    max_attempts: int
+    next_retry_at: datetime | None
+    error_message: str
+    delivered_at: datetime | None
 
 
 class HealthNotificationListResponse(BaseModel):

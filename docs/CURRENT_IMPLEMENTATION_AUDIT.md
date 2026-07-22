@@ -19,10 +19,11 @@
 | FHIR-like 患者事实 | IMPLEMENTED | `patient_facts`、`backend/patient/facts.py` | 当前是轻量 canonical schema，不是完整 FHIR Server |
 | 文档候选事实审核 | IMPLEMENTED | `patient_fact_candidates`、`backend/patient/fact_candidates.py`、`HealthRecordWorkspace.vue` | 本地规则默认运行；外部 LLM 增强必须显式同意，仍需临床抽取 golden set |
 | 患者健康时间轴 | IMPLEMENTED | `patient_timeline_events`、`get_patient_timeline` | 按 effective_at 排序；自然语言模糊时间抽取尚未实现 |
-| Typed Patient Tools | PARTIAL | `backend/patient/tools.py` | 读取事实/时间轴和提醒草稿已实现；趋势计算等接口仍保留为 unavailable |
-| 长期健康任务 | IMPLEMENTED | `health_tasks`、`health_task_runs`、`health_notifications`、scheduler 与 API | 五类任务、确认、持久化入队、领取、退避重试、等待输入、周期摘要和站内通知已实现；外部推送渠道未实现 |
+| Typed Patient Tools | IMPLEMENTED | `backend/patient/tools.py`、`patient/planner.py`、`patient/trends.py` | 白名单规则规划默认启用，可选受约束 LLM 规划并自动回退；趋势仅使用已核验 Observation |
+| 长期健康任务 | IMPLEMENTED | `health_tasks`、`health_task_runs`、`health_notifications`、scheduler 与 API | 五类任务、确认、持久化入队、领取、退避重试、等待输入、周期摘要和站内通知已实现 |
+| 外部通知 | PARTIAL | `health_notification_deliveries`、`backend/tasks/notifications.py` | 邮件/Webhook 适配、同意门槛、幂等和独立重试已实现；尚未用真实供应商执行验收 |
 | LangGraph RAG 图 | IMPLEMENTED | `backend/rag/pipeline.py` 的 `build_rag_graph` 与子图 | 负责公共证据检索，作为咨询状态机内的检索能力运行 |
-| 咨询 Orchestrator | IMPLEMENTED | `backend/agent/orchestrator.py`、`chat/service.py` | RECEIVE 到 COMPLETED 的八阶段轨迹、Evidence State、Action Policy、无证据/冲突/高风险策略已接入；模型动态选择 Patient Tool 仍未实现 |
+| 咨询 Orchestrator | IMPLEMENTED | `backend/agent/orchestrator.py`、`chat/service.py` | RECEIVE 到 COMPLETED 的八阶段轨迹、Evidence State、Action Policy、无证据/冲突/高风险策略和动态白名单 Patient Tool 已接入 |
 | Recent Messages | IMPLEMENTED | `backend/rag/context_compression.py`、`backend/chat/service.py` | 窗口策略较简单 |
 | Persistent Note | PARTIAL | `backend/chat/service.py` 的笔记生成与注入 | LLM 摘要未结构化、无事实可信状态 |
 | 语义/情景记忆 | PARTIAL | `backend/memory/service.py`、两类 Milvus collection | 已强制 tenant/patient 过滤并标记未核验；仍缺过期、确认和撤回流程 |
@@ -49,7 +50,9 @@
 | 医院导航 | PARTIAL | `backend/care_navigation/` | 依赖定位授权和外部地图/搜索服务 |
 | RAGCare 评测框架 | IMPLEMENTED | dataset、retrieval、metrics、judge、runner、测试 | 目标仓库不包含原始 420 条和正式结果 |
 | 正式 RAGAS 代码 | IMPLEMENTED | `backend/evaluation/ragas_*`、评测脚本 | 当前目标仓库未发现可复现正式结果 |
-| 运行时 RAGAS-lite | PARTIAL | `backend/chat/service.py` | 仅启发式监控，不是 RAGAS 模型评审 |
+| 运行时 RAGAS-lite | PARTIAL | `backend/chat/service.py`、`backend/observability/service.py` | 已进入管理员聚合监控；仅启发式信号，不是 RAGAS 模型评审 |
+| 全局可观测性 | IMPLEMENTED | `/observability/summary`、`ObservabilityWorkspace.vue` | 只输出聚合计数，不返回问题、回答或患者标识；尚未接 Prometheus/OpenTelemetry |
+| Health Agent 策略评测 | IMPLEMENTED | `evaluation/healthtrace_agent_v1.jsonl`、`scripts/evaluate_healthtrace_agent.py` | 42 条人工规则用例当前 42/42；不是临床医学答案评测 |
 | MIRAGE 评测 | IMPLEMENTED | dataset、metrics、runner、CLI 与历史结果摘要 | 原始 7,663 条逐题结果不提交 Git |
 
 ## 当前真实上下文注入
@@ -68,7 +71,7 @@ System Prompt
 → 工具返回的向量/KG/导航证据
 ```
 
-当前已有规则版 `required_patient_fields`、最小化患者上下文查询、确定性高风险旁路、统一 Evidence State 和 Action Policy。动态模型选择患者工具与复杂 Observation 趋势工具仍待实现。
+当前已有规则版 `required_patient_fields`、最小化患者上下文查询、确定性高风险旁路、统一 Evidence State 和 Action Policy。患者上下文由白名单工具规划器选择；默认规则模式，可切换受约束 LLM，任何解析/超时失败都回退规则。Observation 趋势按患者 scope、核验状态和临床时间计算。
 
 ## 当前数据结构
 
@@ -76,8 +79,8 @@ PostgreSQL 已增加 tenant、patient、document、fact candidate、FHIR-like fa
 
 ## 测试覆盖判断
 
-迁移前基线为 35 项，Phase 0 为 39 项；当前为 79 项通过。新增覆盖三阶段加法迁移、跨患者数据/API 隔离、八阶段咨询状态机、无证据策略、工具审计、任务幂等、故障重试、周期摘要、等待输入、目标与通知。2026-07-22 已在真实旧 PostgreSQL/Milvus 上完成三阶段加法迁移、备份校验、独立患者 collection、本地 BGE-M3 患者文档和候选事实冒烟验收。缺口包括真实患者 PDF/OCR 抽取质量、安全攻击集、患者召回 golden set、动态 Patient Tool 选择和外部通知渠道。
+迁移前基线为 35 项，Phase 0 为 39 项；当前为 90 项通过。新增覆盖四阶段加法迁移、跨患者数据/API 隔离、八阶段咨询状态机、Agent 策略评测、Observation 趋势、Patient Tool fallback、聚合可观测性、任务幂等、外部通知同意与独立重试。2026-07-22 已在真实旧 PostgreSQL/Milvus 上完成四阶段迁移、备份校验、独立患者 collection、本地 BGE-M3 患者文档和候选事实冒烟验收。
 
 ## 下一步
 
-下一步优先建设患者文档检索 golden set、动态 Patient Tool 规划、Observation 趋势工具、安全攻击集和外部通知适配器；在完成临床数据验证前仍不得描述为临床诊疗系统。
+下一步优先建设患者文档检索 golden set、临床审核安全攻击集、真实通知供应商验收、OpenTelemetry 指标出口和多成员 tenant 权限；在完成临床数据验证前仍不得描述为临床诊疗系统。

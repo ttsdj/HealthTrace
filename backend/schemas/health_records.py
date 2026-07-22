@@ -72,3 +72,30 @@ class PatientTimelineResponse(BaseModel):
 class FactRetractionResponse(BaseModel):
     fact_id: str
     status: str
+
+
+class ObservationTrendPoint(BaseModel):
+    fact_id: str
+    effective_at: datetime
+    value: float
+    unit: str = ""
+    source_type: str
+    verification_status: str
+
+
+class ObservationTrendResponse(BaseModel):
+    code: str
+    metric: str
+    count: int
+    unit: str = ""
+    first: float | None = None
+    latest: float | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    delta: float | None = None
+    percent_change: float | None = None
+    direction: str
+    slope_per_day: float | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+    points: list[ObservationTrendPoint] = Field(default_factory=list)

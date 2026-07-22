@@ -34,3 +34,4 @@ class PatientToolResult(BaseModel):
     status: Literal["ok", "empty", "capability_unavailable", "error"]
     data: list[dict] = Field(default_factory=list)
     error: str = ""
+    metadata: dict = Field(default_factory=dict)

@@ -24,11 +24,12 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
   -> 隐私脱敏、医疗风险与轻量意图识别
   -> 最小化患者事实 + 私有病历证据 + Recent Messages + Persistent Note + 语义/情景记忆
   -> Health Agent 状态机：接收、规划、患者上下文、信息检查、证据评级、动作决策、执行持久化
+  -> 白名单 Patient Tool 规划：规则默认，受约束 LLM 可选，失败自动回退
   -> LangGraph 复杂度路由与纠错检索
   -> Milvus BGE-M3 Dense + 原生 BM25 + RRF
   -> 可选 Reranker、Neo4j KG 和医院导航工具
   -> 证据压缩、冲突提示和安全回答
-  -> Vue 工作台展示引用、检索 Trace 和运行质量信号
+  -> Vue 工作台展示引用、检索 Trace、Observation 趋势和聚合运行监控
 ```
 
 工程策略：
@@ -41,6 +42,8 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - 公共知识和患者病历分别进入独立 Milvus collection，患者原文件按 tenant/patient/document 分域。
 - 患者文档先生成待审核候选事实；只有用户确认后才写入 FHIR-like 事实与临床时间轴。
 - 长期任务先创建待确认草稿；确认后由 PostgreSQL 持久队列入队、领取、执行、退避重试，并生成站内通知。
+- 邮件/Webhook 采用站内通知先提交、外部通道后投递；必须显式同意，失败独立重试且不回滚任务。
+- 管理员可查看不含对话正文和患者标识的聚合可观测指标。
 
 ### R - Result
 
@@ -53,12 +56,16 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - tenant/patient 数据边界、患者私有 RAG、候选事实审核、FHIR-like 患者事实和来源可追溯时间轴。
 - LangGraph 咨询状态机、统一 Evidence State/Action Policy、高风险 LLM 旁路、无证据拦截和工具调用审计。
 - 健康目标、提醒/随访/测量/周期摘要/目标检查任务、持久化执行、指数退避重试和站内通知。
-- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 79 项通过。
+- 已验证 Observation 趋势、动态白名单 Patient Tool 规划及规划器失败回退。
+- 管理员运行监控面板：Evidence State、检索降级、工具成功率与 P50/P95、任务重试和 ragas_lite 信号。
+- 可选邮件/Webhook 通知适配器，具备显式同意、幂等、独立重试和站内 fallback。
+- 42 条 Health Agent 策略集覆盖高风险、缺信息、证据源、工具路由、隐私和边界，当前 42/42 通过。
+- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 90 项通过。
 
 尚未完成、不得对外宣称已实现：
 
-- 基于模型的动态 Patient Tool 选择和 Observation 趋势计算；当前为后端最小化查询与确定性规划。
-- 长期任务的短信、邮件、移动推送渠道，以及机构级多成员 tenant 权限。
+- 短信、原生移动推送、机构级多成员 tenant 权限和外部通道真实供应商验收。
+- 临床人员审核的 Agent 安全集与患者 Observation 趋势 golden set。
 - 多模态向量、Any-to-Any 检索和临床级医学影像理解。
 
 详细证据见 `docs/CURRENT_IMPLEMENTATION_AUDIT.md` 和 `docs/METRIC_REPRODUCIBILITY_AUDIT.md`。
@@ -170,6 +177,22 @@ npm --prefix frontend run build
 docker compose config
 ```
 
+### 容器化应用栈
+
+在完成 `.env` 配置后，可同时构建前端和后端应用镜像并启动基础设施：
+
+```cmd
+docker compose -f docker-compose.yml -f docker-compose.app.yml up -d --build
+```
+
+应用容器直接托管构建后的 Vue 页面，默认访问 `http://127.0.0.1:8000`。本地开发仍推荐使用 `start.bat`，便于前后端热更新。
+
+Phase 4 外部通知表为加法迁移，既有部署升级前执行：
+
+```cmd
+.venv\Scripts\python.exe scripts\migrate_phase4_notifications.py apply
+```
+
 ## 数据与安全
 
 - 不提交 `.env`、API key、token、数据库密码和精确定位信息。
@@ -182,8 +205,8 @@ docker compose config
 ## 迭代路线
 
 1. 患者文档抽取 golden set 与字段级准确率评测。
-2. 动态 Typed Patient Tools、Observation 趋势计算和更细粒度主动追问。
-3. 短信、邮件或移动推送适配器及通知回执。
+2. 用真实患者纵向数据验证 Observation 趋势与主动追问策略。
+3. 短信/移动推送适配器、真实邮件/Webhook 供应商验收和通知回执。
 4. 在硬件或外部推理资源满足后开展多模态 POC。
 5. 检索、生成、Agent、抽取、安全和性能消融评测。
 

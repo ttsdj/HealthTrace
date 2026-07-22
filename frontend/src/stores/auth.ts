@@ -4,6 +4,7 @@ import type { CurrentUser } from '@/types/user';
 import { useSessionStore } from '@/stores/sessions';
 import { useChatStore } from '@/stores/chat';
 import { useHealthRecordStore } from '@/stores/healthRecords';
+import { useObservabilityStore } from '@/stores/observability';
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -66,6 +67,7 @@ export const useAuthStore = defineStore('auth', {
         sessionStore.$reset();
         chatStore.$reset();
         healthRecordStore.$reset();
+        useObservabilityStore().$reset();
 
         this.token = data.access_token;
         this.currentUser = {
@@ -98,6 +100,7 @@ export const useAuthStore = defineStore('auth', {
       sessionStore.$reset();
       chatStore.$reset();
       healthRecordStore.$reset();
+      useObservabilityStore().$reset();
     },
   },
 });
