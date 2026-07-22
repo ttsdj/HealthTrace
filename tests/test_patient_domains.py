@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session
 
 from backend.db.models import DocumentRecord, PatientProfile, Tenant, User
 from backend.infra.database import Base
-from backend.infra.migrations import PHASE1_VERSION, apply_phase1_migration, rollback_phase1_migration
+from backend.infra.migrations import (
+    PHASE1_VERSION,
+    apply_phase1_migration,
+    get_phase1_migration_status,
+    rollback_phase1_migration,
+)
 from backend.patient.documents import scope_document_chunks
 from backend.patient.retrieval import patient_scope_filter
 from backend.patient.scope import PatientScope, ensure_user_scope
@@ -135,6 +140,16 @@ def test_phase1_migration_is_additive_and_rollback_preserves_data(tmp_path):
                 "'2026-01-01 00:00:00')"
             )
         )
+
+    assert get_phase1_migration_status(engine) == {
+        "version": PHASE1_VERSION,
+        "status": "not_applied",
+        "details": {},
+    }
+    assert rollback_phase1_migration(engine) == {
+        "version": PHASE1_VERSION,
+        "status": "not_applied",
+    }
 
     result = apply_phase1_migration(engine)
     assert result["status"] == "applied"

@@ -12,8 +12,8 @@ def main() -> int:
 
     from backend.infra.database import engine
     from backend.infra.migrations import (
-        PHASE1_VERSION,
         apply_phase1_migration,
+        get_phase1_migration_status,
         rollback_phase1_migration,
     )
 
@@ -22,16 +22,7 @@ def main() -> int:
     elif args.action == "rollback":
         result = rollback_phase1_migration(engine)
     else:
-        from backend.db.models import SchemaMigration
-        from sqlalchemy.orm import Session
-
-        with Session(engine) as db:
-            record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE1_VERSION).first()
-            result = {
-                "version": PHASE1_VERSION,
-                "status": record.status if record else "not_applied",
-                "details": record.details_json if record else {},
-            }
+        result = get_phase1_migration_status(engine)
 
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0

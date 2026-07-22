@@ -61,3 +61,6 @@ study = [
 [tool.setuptools.packages.find]
 include = ["backend*"]
 exclude = ["frontend*", "scripts*", "docs*", "data*", "volumes*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

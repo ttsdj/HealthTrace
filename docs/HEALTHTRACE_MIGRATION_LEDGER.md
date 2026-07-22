@@ -61,5 +61,8 @@ HEALTHTRACE_INFRA_MODE=external
 - 新患者向量：独立 `healthtrace_patient_record_text_v1`，禁止回退公共 collection。
 - 新权威数据：FHIR-like facts、timeline、health tasks 和 task runs。
 - 回滚：迁移状态改为 `rolled_back` 并关闭功能开关，数据保留。
-- 验证：55 项测试通过，包含认证后的患者事实、时间轴和任务 HTTP 流程。
-- 未执行：当前本机旧 PostgreSQL、Milvus collection 和 Docker volumes 均未迁移或修改。
+- 验证：60 项测试通过，包含认证后的患者事实、时间轴和任务 HTTP 流程。
+- 真实迁移：已在 `medretrieve_v2` PostgreSQL 执行加法迁移；用户和父块计数保持不变，旧父块全部标记为 `public_medical`。
+- Milvus：旧 collection 未重建；新增空的 `healthtrace_patient_record_text_v1`，包含 tenant/patient/domain/owner 隔离字段。
+- 运行验收：`/health` 返回 `ready=true`，PostgreSQL、Redis、Milvus、LLM 配置正常；Neo4j 当前未启动并按可选能力降级。
+- 详细记录：见 `docs/PHASE1_REAL_INFRA_VALIDATION.md`。

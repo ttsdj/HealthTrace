@@ -8,6 +8,23 @@ from sqlalchemy import Engine, inspect, text
 PHASE1_VERSION = "2026_07_22_phase1_document_domains"
 
 
+def get_phase1_migration_status(engine: Engine) -> dict:
+    """Read Phase 1 state without creating or mutating migration tables."""
+    if not inspect(engine).has_table("healthtrace_schema_migrations"):
+        return {"version": PHASE1_VERSION, "status": "not_applied", "details": {}}
+
+    from backend.db.models import SchemaMigration
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as db:
+        record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE1_VERSION).first()
+        return {
+            "version": PHASE1_VERSION,
+            "status": record.status if record else "not_applied",
+            "details": record.details_json if record else {},
+        }
+
+
 def _add_column_if_missing(conn, table_name: str, column_name: str, ddl: str) -> bool:
     columns = {item["name"] for item in inspect(conn).get_columns(table_name)}
     if column_name in columns:
@@ -105,6 +122,9 @@ def apply_phase1_migration(engine: Engine) -> dict:
 
 def rollback_phase1_migration(engine: Engine) -> dict:
     """Disable Phase 1 without dropping data; physical cleanup is intentionally manual."""
+    if get_phase1_migration_status(engine)["status"] == "not_applied":
+        return {"version": PHASE1_VERSION, "status": "not_applied"}
+
     from backend.db.models import SchemaMigration
     from sqlalchemy.orm import Session
 

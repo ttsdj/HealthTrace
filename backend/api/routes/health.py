@@ -131,15 +131,10 @@ def _check_llm_config() -> dict:
 def _patient_capabilities() -> dict:
     migration_status = "unknown"
     try:
-        from backend.db.models import SchemaMigration
-        from backend.infra.migrations import PHASE1_VERSION
+        from backend.infra.database import engine
+        from backend.infra.migrations import get_phase1_migration_status
 
-        db = SessionLocal()
-        try:
-            record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE1_VERSION).first()
-            migration_status = record.status if record else "not_applied"
-        finally:
-            db.close()
+        migration_status = get_phase1_migration_status(engine)["status"]
     except Exception:
         migration_status = "unavailable"
     return {
