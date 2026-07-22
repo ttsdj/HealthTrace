@@ -51,3 +51,15 @@ HEALTHTRACE_INFRA_MODE=external
 5. 多模态 POC（延期，默认关闭）。
 6. 长期健康任务。
 7. 全面评测与消融。
+
+## 2026-07-22 患者数据基础升级
+
+- 分支：`feature/healthtrace-phase1-data-domains`
+- 迁移版本：`2026_07_22_phase1_document_domains`
+- 方式：只增加 tenant/patient/document 字段、患者表和索引，不删除旧数据。
+- 旧父块：回填为 `public_medical`。
+- 新患者向量：独立 `healthtrace_patient_record_text_v1`，禁止回退公共 collection。
+- 新权威数据：FHIR-like facts、timeline、health tasks 和 task runs。
+- 回滚：迁移状态改为 `rolled_back` 并关闭功能开关，数据保留。
+- 验证：55 项测试通过，包含认证后的患者事实、时间轴和任务 HTTP 流程。
+- 未执行：当前本机旧 PostgreSQL、Milvus collection 和 Docker volumes 均未迁移或修改。

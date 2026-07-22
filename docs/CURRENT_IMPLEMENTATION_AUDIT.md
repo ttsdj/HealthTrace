@@ -1,6 +1,6 @@
 # HealthTrace 当前实现审计
 
-审计基线：Git tag `medretrieve-v3-baseline`，源提交 `15cab76`。审计日期：2026-07-21。
+审计基线：Git tag `medretrieve-v3-baseline`，源提交 `15cab76`。最近更新：2026-07-22。
 
 状态定义：
 
@@ -14,11 +14,16 @@
 | 能力 | 状态 | 代码证据 | 限制 |
 |---|---|---|---|
 | FastAPI + Vue 工作台 | IMPLEMENTED | `backend/app.py`、`frontend/src/App.vue` | 当前是桌面 Web，不含移动端 |
-| JWT 与会话隔离 | IMPLEMENTED | `backend/infra/auth.py`、`backend/chat/storage.py`、sessions 路由 | 隔离主体是 `user_id`，尚无 tenant/patient 维度 |
+| JWT 与会话隔离 | IMPLEMENTED | `backend/infra/auth.py`、`backend/patient/scope.py`、sessions 路由 | 每名现有用户迁移到独立 tenant/patient；尚未实现机构多成员租户 |
+| 公共/患者文档分域 | IMPLEMENTED | `patient_documents.py`、`migrate_phase1_domains.py` | 新患者数据使用独立 collection；真实旧 PostgreSQL/Milvus 环境仍需执行迁移验收 |
+| FHIR-like 患者事实 | IMPLEMENTED | `patient_facts`、`backend/patient/facts.py` | 当前是轻量 canonical schema，不是完整 FHIR Server |
+| 患者健康时间轴 | IMPLEMENTED | `patient_timeline_events`、`get_patient_timeline` | 按 effective_at 排序；自然语言模糊时间抽取尚未实现 |
+| Typed Patient Tools | PARTIAL | `backend/patient/tools.py` | 读取事实/时间轴和提醒草稿已实现；趋势计算等接口仍保留为 unavailable |
+| 长期健康任务 | PARTIAL | `health_tasks`、`health_task_runs`、scheduler 与 API | 幂等、确认、取消和跨会话恢复已实现；外部通知渠道尚未实现 |
 | LangGraph RAG 图 | IMPLEMENTED | `backend/rag/pipeline.py` 的 `build_rag_graph` 与子图 | 这是检索图，不是完整 Health Agent 咨询状态机 |
 | Recent Messages | IMPLEMENTED | `backend/rag/context_compression.py`、`backend/chat/service.py` | 窗口策略较简单 |
 | Persistent Note | PARTIAL | `backend/chat/service.py` 的笔记生成与注入 | LLM 摘要未结构化、无事实可信状态 |
-| 语义/情景记忆 | PARTIAL | `backend/memory/service.py`、两类 Milvus collection | 语义事实由规则触发，未做用户确认、过期和撤回 |
+| 语义/情景记忆 | PARTIAL | `backend/memory/service.py`、两类 Milvus collection | 已强制 tenant/patient 过滤并标记未核验；仍缺过期、确认和撤回流程 |
 | BGE-M3 Dense | IMPLEMENTED | `backend/indexing/embedding.py` | 首次加载模型成本较高，主要按 CPU 环境验证 |
 | Milvus 原生 BM25 | IMPLEMENTED | `backend/indexing/milvus_client.py` 的 BM25 Function | 依赖 Milvus 2.5+ |
 | Hybrid + RRF | IMPLEMENTED | `hybrid_retrieve` 与 `RRFRanker` | 生产权重仍需消融验证 |
@@ -33,7 +38,7 @@
 | PaddleOCR / PP-Structure | PARTIAL | `backend/indexing/ocr.py` | 可选重依赖；测试主要验证路由与容错，不是临床字段准确率 |
 | VLM fallback | NOT_FOUND | 无 VLM 调用实现 | 仅在目标架构中规划 |
 | 多模态向量 | NOT_FOUND | 无视觉 collection 或跨模态 embedding | 4GB GPU 环境下延期 POC |
-| PostgreSQL 会话模型 | IMPLEMENTED | `users`、`chat_sessions`、`chat_messages`、`parent_chunks` | 无患者健康事实表 |
+| PostgreSQL 数据模型 | IMPLEMENTED | 会话、文档、患者事实、时间轴和长期任务模型 | 高并发调度、字段加密与完整 FHIR 映射尚未实现 |
 | Redis 缓存 | PARTIAL | `backend/infra/cache.py`、父块缓存 | 无完整任务状态、查询缓存治理和缓存一致性审计 |
 | Neo4j 医疗 KG | PARTIAL | `backend/kg/client.py`、`search_medical_kg` | 查询工具已接入；实际图数据完整性取决于外部实例 |
 | 医疗安全规则 | PARTIAL | `backend/medical_nlp/safety.py` | 规则型高风险与剂量提示，不是完整 Action Policy |
@@ -52,6 +57,7 @@
 ```text
 System Prompt
 → Persistent Note
+→ 按问题最小化查询的已确认患者事实
 → 相关语义/情景记忆
 → 定位授权与安全提示
 → 压缩后的近期对话
@@ -59,16 +65,16 @@ System Prompt
 → 工具返回的向量/KG/导航证据
 ```
 
-这与目标 Health Agent 的差距是：尚未先规划 `required_patient_fields`，也没有从受控患者工具中查询已验证事实。
+当前已有规则版 `required_patient_fields` 和受控患者工具，但尚未接入完整咨询 Orchestrator、Missing Information Checker 与 Action Policy。
 
 ## 当前数据结构
 
-PostgreSQL 当前只有用户、会话、消息和父块四类核心表。Milvus 使用统一 dense/sparse schema，并通过环境变量选择医疗问答、情景记忆和语义记忆 collection。当前没有 `document_domain`、`tenant_id`、`patient_id`、事实可信状态或患者专属 collection。
+PostgreSQL 已增加 tenant、patient、document、FHIR-like fact、timeline、health task/run 等表；父块增加 document domain 与患者 scope。Milvus 新增独立 `patient_record` collection，患者检索必须带 tenant/patient 过滤。旧公共 collection 不做破坏性改造。
 
 ## 测试覆盖判断
 
-迁移前基线为 35 项测试通过；Phase 0 新增健康状态、连接配置、品牌配置和双用户同 session id 隔离测试后为 39 项通过。当前覆盖 RAGCare 数据转换/指标、RAGAS 解析、MIRAGE 指标、OCR 路由和医院导航。缺口包括完整登录端到端、真实 Milvus/Neo4j 集成、tenant/patient 数据隔离、安全攻击集、真实 OCR 准确率和 Health Agent 状态决策。
+迁移前基线为 35 项，Phase 0 为 39 项；当前为 55 项通过。新增覆盖加法迁移/无损回滚、跨患者文档与事实隔离、临床时间轴、工具合约、任务幂等，以及认证后的事实→时间轴→任务 HTTP 流程。缺口包括真实 PostgreSQL/Milvus 集成迁移、安全攻击集、真实 OCR 准确率和完整 Health Agent 状态决策。
 
 ## 下一步
 
-Phase 1 先做数据分域和 tenant/patient 权限边界；在此之前不得把当前系统描述为“完整个人健康管理 Agent”。
+下一步优先完成真实基础设施迁移验收、Patient Context Planner 的主动追问和完整 Agent Evidence State；在此之前仍不得描述为“完整个人健康管理 Agent”。

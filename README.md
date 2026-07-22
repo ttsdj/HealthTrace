@@ -22,7 +22,7 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 用户问题
   -> FastAPI 鉴权与用户会话隔离
   -> 隐私脱敏、医疗风险与轻量意图识别
-  -> Recent Messages + Persistent Note + 语义/情景记忆
+  -> 最小化患者事实 + Recent Messages + Persistent Note + 语义/情景记忆
   -> LangGraph 复杂度路由与纠错检索
   -> Milvus BGE-M3 Dense + 原生 BM25 + RRF
   -> 可选 Reranker、Neo4j KG 和医院导航工具
@@ -37,6 +37,8 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - 大文档先写入首批页面或 chunk，使部分内容尽早可检索，剩余批次后台继续处理。
 - PostgreSQL 保存用户、会话和父块；Redis 缓存父块与短期状态；Milvus 保存叶子块与记忆；Neo4j 是可选增强服务。
 - 配置只从本地 `.env` 读取，代码和 Git 历史不保存真实密钥。
+- 公共知识和患者病历分别进入独立 Milvus collection，患者原文件按 tenant/patient/document 分域。
+- 长期任务先创建待确认草稿，确认后由幂等调度器生成到期运行记录。
 
 ### R - Result
 
@@ -46,13 +48,13 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - BGE-M3、Milvus 2.5+ 原生 BM25、Hybrid RRF、三级父子分块与检索降级。
 - MinerU/PDF/OCR 解析降级、渐进式向量入库与批量 Milvus 写入。
 - Neo4j 医疗知识图谱工具、语义/情景记忆、上下文压缩和医疗安全规则。
-- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；迁移后仓库测试为 39 项通过。
+- tenant/patient 数据边界、FHIR-like 患者事实、来源可追溯时间轴和长期任务基础。
+- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 55 项通过。
 
 尚未完成、不得对外宣称已实现：
 
-- 公共医学知识与个人病历的完整数据分域。
-- FHIR-like 患者事实表、可信状态、健康时间轴和 Typed Patient Tools。
-- 完整咨询 Agent 的 Evidence State、Action Policy 和长期健康任务。
+- 完整咨询 Agent 的 Evidence State、Missing Information Checker 和 Action Policy。
+- 长期任务的短信/邮件/移动推送渠道，以及机构级多成员 tenant 权限。
 - 多模态向量、Any-to-Any 检索和临床级医学影像理解。
 
 详细证据见 `docs/CURRENT_IMPLEMENTATION_AUDIT.md` 和 `docs/METRIC_REPRODUCIBILITY_AUDIT.md`。
