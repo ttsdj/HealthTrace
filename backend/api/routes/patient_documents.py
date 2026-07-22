@@ -67,6 +67,26 @@ async def list_patient_documents(
                 created_at=item.created_at,
                 updated_at=item.updated_at,
                 chunks_processed=int((item.metadata_json or {}).get("leaf_chunks", 0)),
+                fact_candidate_count=int(
+                    ((item.metadata_json or {}).get("fact_extraction") or {}).get(
+                        "candidate_count", 0
+                    )
+                ),
+                fact_extraction_status=(
+                    ((item.metadata_json or {}).get("fact_extraction") or {}).get(
+                        "status", "not_started"
+                    )
+                ),
+                fact_extraction_method=(
+                    ((item.metadata_json or {}).get("fact_extraction") or {}).get(
+                        "method", ""
+                    )
+                ),
+                fact_extraction_warning=(
+                    ((item.metadata_json or {}).get("fact_extraction") or {}).get(
+                        "warning", ""
+                    )
+                ),
             )
             for item in records
         ]

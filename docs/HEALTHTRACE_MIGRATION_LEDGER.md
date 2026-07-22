@@ -61,9 +61,20 @@ HEALTHTRACE_INFRA_MODE=external
 - 新患者向量：独立 `healthtrace_patient_record_text_v1`，禁止回退公共 collection。
 - 新权威数据：FHIR-like facts、timeline、health tasks 和 task runs。
 - 回滚：迁移状态改为 `rolled_back` 并关闭功能开关，数据保留。
-- 验证：66 项测试通过，包含认证后的患者事实、时间轴、任务 HTTP 流程、患者检索降级和 Milvus flush。
+- 验证：70 项测试通过，包含认证后的患者事实、时间轴、任务 HTTP 流程、患者检索降级和 Milvus flush。
 - 真实迁移：已在 `medretrieve_v2` PostgreSQL 执行加法迁移；用户和父块计数保持不变，旧父块全部标记为 `public_medical`。
 - Milvus：旧 collection 未重建；新增空的 `healthtrace_patient_record_text_v1`，包含 tenant/patient/domain/owner 隔离字段。
 - 患者链路：使用本地 BGE-M3 和无隐私合成文档验证上传、Hybrid 召回、聊天上下文注入、跨患者零泄漏及协调删除；测试结束后可查询残留为 0。
 - 运行验收：`/health` 返回 `ready=true`，PostgreSQL、Redis、Milvus、LLM 配置正常；Neo4j 当前未启动并按可选能力降级。
 - 详细记录：见 `docs/PHASE1_REAL_INFRA_VALIDATION.md`。
+
+## 2026-07-22 候选事实与健康档案工作台
+
+- 迁移版本：`2026_07_22_phase2_fact_candidates`。
+- 新表：`patient_fact_candidates`，只保存待确认、已确认或已拒绝的抽取候选。
+- 安全边界：默认本地规则抽取；外部 LLM 增强要求 API 和前端双重显式同意。
+- 权威写入：候选经患者确认后才写入 `patient_facts` 并创建 `patient_timeline_events`。
+- 前端：新增患者资料、待确认、健康事实、时间轴、长期任务五个栏目，并在登录/登出时清空患者缓存。
+- 真实迁移：执行前已生成本地忽略的 PostgreSQL 备份；迁移只新增一张表，重复执行 `changes=[]`，旧表行数保持不变。
+- 端到端：本地 BGE-M3 合成病历完成上传、Hybrid 检索、跨患者零命中、规则候选、确认入档、时间轴和协调删除；测试记录残留为 0。
+- 视觉验证：桌面 1280×720 与移动 390×844 均无横向溢出，移动端保留新建对话和健康档案入口。

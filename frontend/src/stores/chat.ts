@@ -12,7 +12,7 @@ export const useChatStore = defineStore('chat', {
     messages: [] as Message[],
     userInput: '',
     isLoading: false,
-    activeNav: 'newChat' as 'newChat' | 'history' | 'settings',
+    activeNav: 'newChat' as 'newChat' | 'history' | 'settings' | 'healthRecord',
     sessionId: createSessionId(),
     abortController: null as AbortController | null,
     activeControllers: {} as Record<string, AbortController>,

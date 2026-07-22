@@ -49,7 +49,15 @@ def main() -> int:
     from fastapi.testclient import TestClient
 
     from backend.app import create_app
-    from backend.db.models import DocumentRecord, PatientProfile, Tenant, User
+    from backend.db.models import (
+        DocumentRecord,
+        PatientFact,
+        PatientFactCandidate,
+        PatientProfile,
+        PatientTimelineEvent,
+        Tenant,
+        User,
+    )
     from backend.indexing.milvus_client import get_milvus_store
     from backend.indexing.parent_chunk_store import ParentChunkStore
     from backend.infra.database import SessionLocal
@@ -88,7 +96,8 @@ def main() -> int:
                 "<html><body><h1>Synthetic patient record</h1>"
                 f"<p>Isolation marker: {marker}. This synthetic record states that the "
                 "patient reported a temporary dry cough on 2026-07-22. It contains no real "
-                "personally identifiable or clinical information.</p></body></html>"
+                "personally identifiable or clinical information.</p>"
+                "<p>2026-07-22</p><p>血压：128/82 mmHg</p></body></html>"
             )
             upload = client.post(
                 "/patient/documents/upload",
@@ -143,6 +152,48 @@ def main() -> int:
             if any(item["document_id"] == document_id for item in cross_body["evidence"]):
                 raise RuntimeError("cross-patient retrieval isolation failed")
 
+            extraction = client.post(
+                f"/patient/documents/{document_id}/fact-candidates/extract",
+                headers=_authorization(auth[0]["access_token"]),
+                json={"use_llm": False, "consent_external_processing": False},
+            )
+            extraction.raise_for_status()
+            extraction_body = extraction.json()
+            if extraction_body["candidate_count"] < 1:
+                raise RuntimeError("local extraction did not create a fact candidate")
+            candidate_id = extraction_body["candidates"][0]["candidate_id"]
+
+            cross_candidates = client.get(
+                "/patient/fact-candidates",
+                headers=_authorization(auth[1]["access_token"]),
+            )
+            cross_candidates.raise_for_status()
+            if cross_candidates.json()["candidates"]:
+                raise RuntimeError("cross-patient fact candidate isolation failed")
+
+            confirmation = client.post(
+                f"/patient/fact-candidates/{candidate_id}/confirm",
+                headers=_authorization(auth[0]["access_token"]),
+                json={},
+            )
+            confirmation.raise_for_status()
+            confirmed_fact_id = confirmation.json()["fact_id"]
+
+            fact_count = len(
+                client.get(
+                    "/patient/facts",
+                    headers=_authorization(auth[0]["access_token"]),
+                ).json()["facts"]
+            )
+            timeline_count = len(
+                client.get(
+                    "/patient/timeline",
+                    headers=_authorization(auth[0]["access_token"]),
+                ).json()["events"]
+            )
+            if fact_count < 1 or timeline_count < 1:
+                raise RuntimeError("confirmed candidate did not create fact and timeline")
+
             deletion = client.delete(
                 f"/patient/documents/{document_id}",
                 headers=_authorization(auth[0]["access_token"]),
@@ -161,6 +212,11 @@ def main() -> int:
                     "patient_record_hits", 0
                 ),
                 "cross_patient_hits": len(cross_body["evidence"]),
+                "candidate_method": extraction_body["extraction_method"],
+                "candidate_count": extraction_body["candidate_count"],
+                "confirmed_fact_id": confirmed_fact_id,
+                "fact_count": fact_count,
+                "timeline_count": timeline_count,
                 "deleted": deletion.json(),
                 "elapsed_seconds": round(time.perf_counter() - started_at, 3),
             }
@@ -215,9 +271,21 @@ def main() -> int:
         with SessionLocal() as db:
             cleanup_ids = [item[0] for item in cleanup_documents]
             if cleanup_ids:
+                db.query(PatientFactCandidate).filter(
+                    PatientFactCandidate.document_id.in_(cleanup_ids)
+                ).delete(synchronize_session=False)
                 db.query(DocumentRecord).filter(DocumentRecord.id.in_(cleanup_ids)).delete(
                     synchronize_session=False
                 )
+            if tenant_ids and patient_ids:
+                db.query(PatientTimelineEvent).filter(
+                    PatientTimelineEvent.tenant_id.in_(tenant_ids),
+                    PatientTimelineEvent.patient_id.in_(patient_ids),
+                ).delete(synchronize_session=False)
+                db.query(PatientFact).filter(
+                    PatientFact.tenant_id.in_(tenant_ids),
+                    PatientFact.patient_id.in_(patient_ids),
+                ).delete(synchronize_session=False)
             for username in usernames:
                 user = db.query(User).filter(User.username == username).first()
                 if user is None:

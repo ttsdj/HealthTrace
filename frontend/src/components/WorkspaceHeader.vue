@@ -11,15 +11,19 @@
     </div>
 
     <div class="workspace-actions">
-      <button class="toolbar-btn" @click="newChat">
+      <button class="toolbar-btn" aria-label="新建对话" @click="newChat">
         <i class="far fa-message"></i>
         <span>新建对话</span>
       </button>
-      <button v-if="authStore.isAdmin" class="toolbar-btn" @click="openKnowledgeBase">
+      <button class="toolbar-btn" aria-label="健康档案" :class="{ active: chatStore.activeNav === 'healthRecord' }" @click="openHealthRecord">
+        <i class="fas fa-notes-medical"></i>
+        <span>健康档案</span>
+      </button>
+      <button v-if="authStore.isAdmin" class="toolbar-btn" aria-label="知识库管理" @click="openKnowledgeBase">
         <i class="fas fa-database"></i>
         <span>知识库管理</span>
       </button>
-      <button v-if="authStore.isAdmin" class="toolbar-btn" @click="openKnowledgeBase">
+      <button v-if="authStore.isAdmin" class="toolbar-btn" aria-label="导入文档" @click="openKnowledgeBase">
         <i class="fas fa-arrow-up-from-bracket"></i>
         <span>导入文档</span>
       </button>
@@ -104,6 +108,11 @@ const newChat = () => {
 
 const openKnowledgeBase = () => {
   chatStore.activeNav = 'settings';
+  sessionStore.showHistorySidebar = false;
+};
+
+const openHealthRecord = () => {
+  chatStore.activeNav = 'healthRecord';
   sessionStore.showHistorySidebar = false;
 };
 

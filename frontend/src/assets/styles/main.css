@@ -4034,6 +4034,87 @@ body,
     justify-self: center;
 }
 
+.app-wrapper.authenticated .workspace-shell.health-record-mode {
+    grid-template-columns: 300px minmax(0, 1fr) !important;
+}
+
+.app-wrapper.left-collapsed .workspace-shell.health-record-mode {
+    grid-template-columns: 0 minmax(0, 1fr) !important;
+}
+
+.workspace-shell.health-record-mode .main-content {
+    min-width: 0;
+}
+
+.toolbar-btn.active {
+    border-color: #9ad5e4 !important;
+    background: #eaf8fb !important;
+    color: #087b9d !important;
+}
+
+@media (max-width: 760px) {
+    .workspace-header {
+        grid-template-columns: 68px minmax(96px, 1fr) auto !important;
+    }
+
+    .brand-lockup {
+        padding: 0 10px !important;
+        gap: 0 !important;
+    }
+
+    .brand-lockup > div:last-child {
+        display: none !important;
+    }
+
+    .brand-mark {
+        width: 44px !important;
+        height: 44px !important;
+    }
+
+    .workspace-actions {
+        display: flex !important;
+        justify-content: flex-start !important;
+        padding: 0 6px !important;
+        gap: 6px !important;
+    }
+
+    .workspace-actions .toolbar-btn {
+        display: none !important;
+    }
+
+    .workspace-actions .toolbar-btn:nth-child(1),
+    .workspace-actions .toolbar-btn:nth-child(2) {
+        width: 42px !important;
+        display: inline-flex !important;
+        justify-content: center !important;
+        padding: 0 !important;
+    }
+
+    .workspace-actions .toolbar-btn span,
+    .workspace-status .api-state,
+    .workspace-status .engine-state {
+        display: none !important;
+    }
+
+    .workspace-status {
+        padding: 0 8px !important;
+        gap: 0 !important;
+    }
+
+    .header-user {
+        height: 42px !important;
+        padding: 0 10px !important;
+    }
+
+    .header-user strong {
+        max-width: 72px;
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
 .clinical-auth.auth-landing {
     align-self: center !important;
     justify-self: center !important;

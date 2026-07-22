@@ -16,6 +16,10 @@ class PatientDocumentInfo(BaseModel):
     created_at: datetime
     updated_at: datetime
     chunks_processed: int = 0
+    fact_candidate_count: int = 0
+    fact_extraction_status: str = "not_started"
+    fact_extraction_method: str = ""
+    fact_extraction_warning: str = ""
 
 
 class PatientDocumentListResponse(BaseModel):

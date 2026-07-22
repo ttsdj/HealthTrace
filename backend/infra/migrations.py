@@ -6,23 +6,33 @@ from uuid import uuid4
 from sqlalchemy import Engine, inspect, text
 
 PHASE1_VERSION = "2026_07_22_phase1_document_domains"
+PHASE2_VERSION = "2026_07_22_phase2_fact_candidates"
 
 
-def get_phase1_migration_status(engine: Engine) -> dict:
-    """Read Phase 1 state without creating or mutating migration tables."""
+def _get_migration_status(engine: Engine, version: str) -> dict:
     if not inspect(engine).has_table("healthtrace_schema_migrations"):
-        return {"version": PHASE1_VERSION, "status": "not_applied", "details": {}}
+        return {"version": version, "status": "not_applied", "details": {}}
 
     from backend.db.models import SchemaMigration
     from sqlalchemy.orm import Session
 
     with Session(engine) as db:
-        record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE1_VERSION).first()
+        record = db.query(SchemaMigration).filter(SchemaMigration.version == version).first()
         return {
-            "version": PHASE1_VERSION,
+            "version": version,
             "status": record.status if record else "not_applied",
             "details": record.details_json if record else {},
         }
+
+
+def get_phase1_migration_status(engine: Engine) -> dict:
+    """Read Phase 1 state without creating or mutating migration tables."""
+    return _get_migration_status(engine, PHASE1_VERSION)
+
+
+def get_phase2_migration_status(engine: Engine) -> dict:
+    """Read candidate-fact migration state without mutating the database."""
+    return _get_migration_status(engine, PHASE2_VERSION)
 
 
 def _add_column_if_missing(conn, table_name: str, column_name: str, ddl: str) -> bool:
@@ -140,3 +150,65 @@ def rollback_phase1_migration(engine: Engine) -> dict:
         }
         db.commit()
     return {"version": PHASE1_VERSION, "status": "rolled_back", "data_preserved": True}
+
+
+def apply_phase2_fact_candidate_migration(engine: Engine) -> dict:
+    """Create candidate-fact staging storage without changing authoritative facts."""
+    from backend.db.models import SchemaMigration
+    from backend.infra.database import Base
+    from sqlalchemy.orm import Session
+
+    existed = inspect(engine).has_table("patient_fact_candidates")
+    Base.metadata.create_all(bind=engine)
+    if not inspect(engine).has_table("patient_fact_candidates"):
+        raise RuntimeError("patient_fact_candidates table was not created")
+
+    now = datetime.utcnow()
+    changes = [] if existed else ["patient_fact_candidates"]
+    details = {
+        "mode": "additive",
+        "changes": changes,
+        "authoritative_write": "user_confirmation_required",
+        "rollback": "feature_flag",
+    }
+    with Session(engine) as db:
+        record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE2_VERSION).first()
+        if record is None:
+            db.add(
+                SchemaMigration(
+                    version=PHASE2_VERSION,
+                    status="applied",
+                    details_json=details,
+                    applied_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            record.status = "applied"
+            record.details_json = details
+            record.updated_at = now
+        db.commit()
+    return {"version": PHASE2_VERSION, "status": "applied", "changes": changes}
+
+
+def rollback_phase2_fact_candidate_migration(engine: Engine) -> dict:
+    """Disable candidate extraction without dropping candidates or confirmed facts."""
+    status = get_phase2_migration_status(engine)
+    if status["status"] == "not_applied":
+        return {"version": PHASE2_VERSION, "status": "not_applied"}
+
+    from backend.db.models import SchemaMigration
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as db:
+        record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE2_VERSION).first()
+        if record is None:
+            return {"version": PHASE2_VERSION, "status": "not_applied"}
+        record.status = "rolled_back"
+        record.updated_at = datetime.utcnow()
+        record.details_json = {
+            **(record.details_json or {}),
+            "rollback": "HEALTHTRACE_FACT_CANDIDATES_ENABLED=false",
+        }
+        db.commit()
+    return {"version": PHASE2_VERSION, "status": "rolled_back", "data_preserved": True}

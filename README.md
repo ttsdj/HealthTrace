@@ -1,6 +1,6 @@
 # HealthTrace
 
-HealthTrace 是一个面向个人用户的健康档案与循证智能咨询系统。当前版本以可运行的医疗 RAG 工作为基础，提供文档入库、混合检索、知识图谱、会话记忆、安全边界和可复现评测；后续将逐步加入个人健康事实、时间轴、主动追问和长期健康任务。
+HealthTrace 是一个面向个人用户的健康档案与循证智能咨询系统。当前版本在可运行的医疗 RAG 基础上，提供公共/患者数据分域、患者文档检索、候选事实审核、FHIR-like 健康事实、时间轴、长期任务、知识图谱、安全边界和可复现评测。
 
 > 本项目用于工程研究与医学知识辅助，不提供诊断、处方、药物剂量调整或急救决策，也不能替代医生。
 
@@ -39,6 +39,7 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - PostgreSQL 保存用户、会话和父块；Redis 缓存父块与短期状态；Milvus 保存叶子块与记忆；Neo4j 是可选增强服务。
 - 配置只从本地 `.env` 读取，代码和 Git 历史不保存真实密钥。
 - 公共知识和患者病历分别进入独立 Milvus collection，患者原文件按 tenant/patient/document 分域。
+- 患者文档先生成待审核候选事实；只有用户确认后才写入 FHIR-like 事实与临床时间轴。
 - 长期任务先创建待确认草稿，确认后由幂等调度器生成到期运行记录。
 
 ### R - Result
@@ -49,9 +50,9 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - BGE-M3、Milvus 2.5+ 原生 BM25、Hybrid RRF、三级父子分块与检索降级。
 - MinerU/PDF/OCR 解析降级、渐进式向量入库与批量 Milvus 写入。
 - Neo4j 医疗知识图谱工具、语义/情景记忆、上下文压缩和医疗安全规则。
-- tenant/patient 数据边界、FHIR-like 患者事实、来源可追溯时间轴和长期任务基础。
+- tenant/patient 数据边界、患者私有 RAG、候选事实审核、FHIR-like 患者事实、来源可追溯时间轴和长期任务基础。
 - 确定性咨询预检、Evidence State/Action Trace 与高风险 LLM 旁路。
-- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 66 项通过。
+- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 70 项通过。
 
 尚未完成、不得对外宣称已实现：
 
@@ -179,13 +180,12 @@ docker compose config
 
 ## 迭代路线
 
-1. 公共知识与个人病历数据分域。
-2. 患者结构化事实、可信状态和健康时间轴。
-3. Patient Context Planner、Typed Tools 和主动追问。
-4. Evidence State、Action Policy 与咨询状态机。
+1. 患者文档抽取 golden set 与字段级准确率评测。
+2. Patient Context Planner、动态 Typed Tools 和主动追问。
+3. Evidence State、Action Policy 与咨询状态机。
+4. 长期任务的通知渠道、健康目标和周期摘要。
 5. 在硬件或外部推理资源满足后开展多模态 POC。
-6. 长期提醒、健康目标和周期摘要。
-7. 检索、生成、Agent、抽取、安全和性能消融评测。
+6. 检索、生成、Agent、抽取、安全和性能消融评测。
 
 ## License
 

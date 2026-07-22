@@ -84,6 +84,51 @@ class DocumentRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class PatientFactCandidate(Base):
+    __tablename__ = "patient_fact_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "patient_id",
+            "candidate_key",
+            name="uq_patient_fact_candidate_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    patient_id: Mapped[str] = mapped_column(
+        ForeignKey("patient_profiles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("document_records.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    candidate_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    display: Mapped[str] = mapped_column(String(500), nullable=False)
+    value_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    clinical_status: Mapped[str] = mapped_column(String(40), default="active", nullable=False)
+    effective_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    effective_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    time_precision: Mapped[str] = mapped_column(String(20), default="approximate", nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_chunk_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    evidence_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    extraction_method: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending", nullable=False, index=True)
+    confirmed_fact_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    reviewed_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class PatientFact(Base):
     __tablename__ = "patient_facts"
 

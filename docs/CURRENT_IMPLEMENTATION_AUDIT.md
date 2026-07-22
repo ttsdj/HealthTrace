@@ -13,10 +13,11 @@
 
 | 能力 | 状态 | 代码证据 | 限制 |
 |---|---|---|---|
-| FastAPI + Vue 工作台 | IMPLEMENTED | `backend/app.py`、`frontend/src/App.vue` | 当前是桌面 Web，不含移动端 |
+| FastAPI + Vue 工作台 | IMPLEMENTED | `backend/app.py`、`frontend/src/App.vue`、`HealthRecordWorkspace.vue` | 桌面与移动端核心布局已验证；不是原生 App |
 | JWT 与会话隔离 | IMPLEMENTED | `backend/infra/auth.py`、`backend/patient/scope.py`、sessions 路由 | 每名现有用户迁移到独立 tenant/patient；尚未实现机构多成员租户 |
 | 公共/患者文档分域 | IMPLEMENTED | `patient_documents.py`、`migrate_phase1_domains.py`、`smoke_patient_rag.py` | 已用本地 BGE-M3 验证上传、Hybrid 召回、聊天注入、跨患者隔离和删除；真实患者 PDF/OCR 质量仍需评测 |
 | FHIR-like 患者事实 | IMPLEMENTED | `patient_facts`、`backend/patient/facts.py` | 当前是轻量 canonical schema，不是完整 FHIR Server |
+| 文档候选事实审核 | IMPLEMENTED | `patient_fact_candidates`、`backend/patient/fact_candidates.py`、`HealthRecordWorkspace.vue` | 本地规则默认运行；外部 LLM 增强必须显式同意，仍需临床抽取 golden set |
 | 患者健康时间轴 | IMPLEMENTED | `patient_timeline_events`、`get_patient_timeline` | 按 effective_at 排序；自然语言模糊时间抽取尚未实现 |
 | Typed Patient Tools | PARTIAL | `backend/patient/tools.py` | 读取事实/时间轴和提醒草稿已实现；趋势计算等接口仍保留为 unavailable |
 | 长期健康任务 | PARTIAL | `health_tasks`、`health_task_runs`、scheduler 与 API | 幂等、确认、取消和跨会话恢复已实现；外部通知渠道尚未实现 |
@@ -71,11 +72,11 @@ System Prompt
 
 ## 当前数据结构
 
-PostgreSQL 已增加 tenant、patient、document、FHIR-like fact、timeline、health task/run 等表；父块增加 document domain 与患者 scope。Milvus 新增独立 `patient_record` collection，患者检索必须带 tenant/patient 过滤。旧公共 collection 不做破坏性改造。
+PostgreSQL 已增加 tenant、patient、document、fact candidate、FHIR-like fact、timeline、health task/run 等表；父块增加 document domain 与患者 scope。Milvus 新增独立 `patient_record` collection，患者检索必须带 tenant/patient 过滤。旧公共 collection 不做破坏性改造。候选事实不会直接成为权威事实，必须经患者确认。
 
 ## 测试覆盖判断
 
-迁移前基线为 35 项，Phase 0 为 39 项；当前为 66 项通过。新增覆盖加法迁移/无损回滚、跨患者文档与事实隔离、临床时间轴、工具合约、任务幂等、认证 HTTP 流程、咨询预检、高风险 LLM 旁路、embedding 单条合约、Milvus flush 和 Sparse 降级。2026-07-22 已在真实旧 PostgreSQL/Milvus 上完成加法迁移、计数守恒、幂等执行、独立患者 collection、`/health` 和本地 BGE-M3 患者文档冒烟验收。缺口包括真实患者 PDF/OCR 质量、安全攻击集、患者召回 golden set 和完整 Health Agent 状态决策。
+迁移前基线为 35 项，Phase 0 为 39 项；当前为 70 项通过。新增覆盖加法迁移/无损回滚、跨患者文档/候选/事实隔离、候选确认幂等、临床时间轴、工具合约、任务幂等、认证 HTTP 流程、咨询预检、高风险 LLM 旁路、embedding 单条合约、Milvus flush 和 Sparse 降级。2026-07-22 已在真实旧 PostgreSQL/Milvus 上完成两阶段加法迁移、计数守恒、幂等执行、独立患者 collection、`/health`、本地 BGE-M3 患者文档和候选事实冒烟验收。缺口包括真实患者 PDF/OCR 与事实抽取质量、安全攻击集、患者召回 golden set 和完整 Health Agent 状态决策。
 
 ## 下一步
 

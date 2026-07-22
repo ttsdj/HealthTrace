@@ -86,6 +86,10 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     if os.getenv("HEALTHTRACE_AUTO_MIGRATE", "false").lower() == "true":
-        from backend.infra.migrations import apply_phase1_migration
+        from backend.infra.migrations import (
+            apply_phase1_migration,
+            apply_phase2_fact_candidate_migration,
+        )
 
         apply_phase1_migration(engine)
+        apply_phase2_fact_candidate_migration(engine)

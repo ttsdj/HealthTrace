@@ -3,6 +3,7 @@ import api from '@/utils/api';
 import type { CurrentUser } from '@/types/user';
 import { useSessionStore } from '@/stores/sessions';
 import { useChatStore } from '@/stores/chat';
+import { useHealthRecordStore } from '@/stores/healthRecords';
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -61,11 +62,18 @@ export const useAuthStore = defineStore('auth', {
 
         const sessionStore = useSessionStore();
         const chatStore = useChatStore();
+        const healthRecordStore = useHealthRecordStore();
         sessionStore.$reset();
         chatStore.$reset();
+        healthRecordStore.$reset();
 
         this.token = data.access_token;
-        this.currentUser = { username: data.username, role: data.role };
+        this.currentUser = {
+          username: data.username,
+          role: data.role,
+          tenant_id: data.tenant_id,
+          patient_id: data.patient_id,
+        };
         localStorage.setItem('accessToken', this.token);
         
         // Reset password fields
@@ -86,8 +94,10 @@ export const useAuthStore = defineStore('auth', {
       // 清空所有用户数据，防止下一个用户看到上一用户的缓存
       const sessionStore = useSessionStore();
       const chatStore = useChatStore();
+      const healthRecordStore = useHealthRecordStore();
       sessionStore.$reset();
       chatStore.$reset();
+      healthRecordStore.$reset();
     },
   },
 });

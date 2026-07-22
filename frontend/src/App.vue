@@ -14,7 +14,7 @@
   >
     <WorkspaceHeader />
 
-    <div class="workspace-shell">
+    <div class="workspace-shell" :class="{ 'health-record-mode': chatStore.activeNav === 'healthRecord' }">
       <Sidebar v-if="!leftCollapsed" />
 
       <button
@@ -27,12 +27,15 @@
 
       <main class="main-content">
         <DocumentSettings v-if="chatStore.activeNav === 'settings'" />
-        <HistorySidebar />
-        <ChatArea v-show="chatStore.activeNav !== 'settings'" />
+        <HealthRecordWorkspace v-else-if="chatStore.activeNav === 'healthRecord'" />
+        <template v-else>
+          <HistorySidebar />
+          <ChatArea />
+        </template>
       </main>
 
       <button
-        v-if="chatStore.activeNav !== 'settings'"
+        v-if="chatStore.activeNav !== 'settings' && chatStore.activeNav !== 'healthRecord'"
         class="panel-toggle panel-toggle-right"
         :title="rightCollapsed ? '展开检索面板' : '收起检索面板'"
         @click="rightCollapsed = !rightCollapsed"
@@ -40,7 +43,7 @@
         <i :class="rightCollapsed ? 'fas fa-chevron-left' : 'fas fa-chevron-right'"></i>
       </button>
 
-      <RetrievalPanel v-if="chatStore.activeNav !== 'settings' && !rightCollapsed" />
+      <RetrievalPanel v-if="chatStore.activeNav !== 'settings' && chatStore.activeNav !== 'healthRecord' && !rightCollapsed" />
     </div>
   </div>
 </template>
@@ -54,6 +57,7 @@ import WorkspaceHeader from '@/components/WorkspaceHeader.vue';
 import RetrievalPanel from '@/components/RetrievalPanelClinical.vue';
 import ChatArea from '@/components/Chat/ChatArea.vue';
 import DocumentSettings from '@/components/Documents/DocumentSettings.vue';
+import HealthRecordWorkspace from '@/components/HealthRecord/HealthRecordWorkspace.vue';
 
 import { useAuthStore } from '@/stores/auth';
 import { useChatStore } from '@/stores/chat';

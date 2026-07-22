@@ -130,19 +130,30 @@ def _check_llm_config() -> dict:
 
 def _patient_capabilities() -> dict:
     migration_status = "unknown"
+    candidate_migration_status = "unknown"
     try:
         from backend.infra.database import engine
-        from backend.infra.migrations import get_phase1_migration_status
+        from backend.infra.migrations import (
+            get_phase1_migration_status,
+            get_phase2_migration_status,
+        )
 
         migration_status = get_phase1_migration_status(engine)["status"]
+        candidate_migration_status = get_phase2_migration_status(engine)["status"]
     except Exception:
         migration_status = "unavailable"
+        candidate_migration_status = "unavailable"
     return {
         "patient_domains_enabled": os.getenv(
             "HEALTHTRACE_PATIENT_DOMAIN_ENABLED", "true"
         ).lower()
         == "true",
         "phase1_migration": migration_status,
+        "phase2_fact_candidates": candidate_migration_status,
+        "fact_candidates_enabled": os.getenv(
+            "HEALTHTRACE_FACT_CANDIDATES_ENABLED", "true"
+        ).lower()
+        == "true",
         "task_scheduler_enabled": os.getenv(
             "HEALTHTRACE_TASK_SCHEDULER_ENABLED", "true"
         ).lower()
