@@ -4,7 +4,7 @@ import asyncio
 import os
 
 from backend.infra.database import SessionLocal
-from backend.tasks.service import process_due_tasks
+from backend.tasks.service import execute_ready_task_runs, process_due_tasks
 
 _scheduler_task: asyncio.Task | None = None
 
@@ -15,6 +15,7 @@ async def _scheduler_loop() -> None:
         db = SessionLocal()
         try:
             process_due_tasks(db)
+            execute_ready_task_runs(db)
             db.commit()
         except Exception as exc:
             db.rollback()

@@ -7,6 +7,7 @@ from sqlalchemy import Engine, inspect, text
 
 PHASE1_VERSION = "2026_07_22_phase1_document_domains"
 PHASE2_VERSION = "2026_07_22_phase2_fact_candidates"
+PHASE3_VERSION = "2026_07_22_phase3_long_term_tasks"
 
 
 def _get_migration_status(engine: Engine, version: str) -> dict:
@@ -33,6 +34,11 @@ def get_phase1_migration_status(engine: Engine) -> dict:
 def get_phase2_migration_status(engine: Engine) -> dict:
     """Read candidate-fact migration state without mutating the database."""
     return _get_migration_status(engine, PHASE2_VERSION)
+
+
+def get_phase3_migration_status(engine: Engine) -> dict:
+    """Read long-term task migration state without mutating the database."""
+    return _get_migration_status(engine, PHASE3_VERSION)
 
 
 def _add_column_if_missing(conn, table_name: str, column_name: str, ddl: str) -> bool:
@@ -212,3 +218,105 @@ def rollback_phase2_fact_candidate_migration(engine: Engine) -> dict:
         }
         db.commit()
     return {"version": PHASE2_VERSION, "status": "rolled_back", "data_preserved": True}
+
+
+def apply_phase3_long_term_task_migration(engine: Engine) -> dict:
+    """Add reliable task execution, goal progress, and in-app notification storage."""
+    from backend.db.models import SchemaMigration
+    from backend.infra.database import Base
+    from sqlalchemy.orm import Session
+
+    Base.metadata.create_all(bind=engine)
+    changes: list[str] = []
+    column_sets = {
+        "health_goals": {
+            "progress_json": "JSON NOT NULL DEFAULT '{}'",
+            "idempotency_key": "VARCHAR(120)",
+            "archived_at": "TIMESTAMP",
+        },
+        "health_tasks": {
+            "last_run_at": "TIMESTAMP",
+            "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
+        },
+        "health_task_runs": {
+            "attempt_count": "INTEGER NOT NULL DEFAULT 0",
+            "max_attempts": "INTEGER NOT NULL DEFAULT 3",
+            "next_retry_at": "TIMESTAMP",
+            "started_at": "TIMESTAMP",
+            "updated_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "worker_id": "VARCHAR(120) NOT NULL DEFAULT ''",
+        },
+    }
+    with engine.begin() as conn:
+        for table_name, columns in column_sets.items():
+            for column_name, ddl in columns.items():
+                if _add_column_if_missing(conn, table_name, column_name, ddl):
+                    changes.append(f"{table_name}.{column_name}")
+        conn.execute(
+            text(
+                "UPDATE health_goals SET idempotency_key = id "
+                "WHERE idempotency_key IS NULL OR idempotency_key = ''"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_health_goal_idempotency_idx "
+                "ON health_goals (tenant_id, patient_id, idempotency_key)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_health_task_runs_retry "
+                "ON health_task_runs (status, next_retry_at)"
+            )
+        )
+
+    now = datetime.utcnow()
+    details = {
+        "mode": "additive",
+        "changes": changes,
+        "created_tables": ["health_notifications"],
+        "queue": "postgresql_durable_task_runs",
+        "rollback": "feature_flag_and_scheduler_disable",
+    }
+    with Session(engine) as db:
+        record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE3_VERSION).first()
+        if record is None:
+            db.add(
+                SchemaMigration(
+                    version=PHASE3_VERSION,
+                    status="applied",
+                    details_json=details,
+                    applied_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            record.status = "applied"
+            record.details_json = details
+            record.updated_at = now
+        db.commit()
+    return {"version": PHASE3_VERSION, "status": "applied", "changes": changes}
+
+
+def rollback_phase3_long_term_task_migration(engine: Engine) -> dict:
+    """Disable execution features without dropping tasks, runs, goals, or notifications."""
+    status = get_phase3_migration_status(engine)
+    if status["status"] == "not_applied":
+        return {"version": PHASE3_VERSION, "status": "not_applied"}
+
+    from backend.db.models import SchemaMigration
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as db:
+        record = db.query(SchemaMigration).filter(SchemaMigration.version == PHASE3_VERSION).first()
+        if record is None:
+            return {"version": PHASE3_VERSION, "status": "not_applied"}
+        record.status = "rolled_back"
+        record.updated_at = datetime.utcnow()
+        record.details_json = {
+            **(record.details_json or {}),
+            "rollback": "HEALTHTRACE_TASK_SCHEDULER_ENABLED=false",
+        }
+        db.commit()
+    return {"version": PHASE3_VERSION, "status": "rolled_back", "data_preserved": True}

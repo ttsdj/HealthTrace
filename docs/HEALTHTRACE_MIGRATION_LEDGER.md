@@ -78,3 +78,15 @@ HEALTHTRACE_INFRA_MODE=external
 - 真实迁移：执行前已生成本地忽略的 PostgreSQL 备份；迁移只新增一张表，重复执行 `changes=[]`，旧表行数保持不变。
 - 端到端：本地 BGE-M3 合成病历完成上传、Hybrid 检索、跨患者零命中、规则候选、确认入档、时间轴和协调删除；测试记录残留为 0。
 - 视觉验证：桌面 1280×720 与移动 390×844 均无横向溢出，移动端保留新建对话和健康档案入口。
+
+## 2026-07-22 Agent 与长期任务闭环
+
+- 迁移版本：`2026_07_22_phase3_long_term_tasks`。
+- 迁移前备份：`data/backups/healthtrace_pre_phase3_20260722.dump`，已通过 `pg_restore -l` 校验；该目录受 Git 忽略。
+- 咨询状态机：新增 RECEIVE、CLASSIFY_AND_PLAN、QUERY_PATIENT_CONTEXT、CHECK_INFORMATION、RETRIEVE_AND_GRADE_EVIDENCE、DECIDE_ACTION、EXECUTE_AND_PERSIST、COMPLETED 八阶段轨迹。
+- 证据策略：高风险和缺失信息在模型前拦截；No Evidence 不输出无依据确定答案；Conflict 强制披露；每次工具调用记录脱敏参数、耗时、尝试次数和失败类型。
+- 长期任务：新增健康目标、任务运行领取、指数退避、最大重试、等待用户输入、周期摘要、目标检查和站内通知。
+- 一致性：`health_task_runs(task_id, run_key)` 与通知 `dedup_key` 保证重复调度不会重复执行或重复通知；PostgreSQL 使用 `FOR UPDATE SKIP LOCKED` 领取任务。
+- 前端：健康任务页展示目标、通知、五类任务和运行记录，支持确认、取消、重试、补录与归档。
+- 真实迁移：已在 `medretrieve_v2` PostgreSQL 执行，只新增 11 个列、索引和 `health_notifications` 表，未删除旧数据。
+- 验证：后端 79 项测试通过，`npm run build` 通过；新增覆盖故障注入、跨患者通知隔离和 Phase 3 幂等迁移。

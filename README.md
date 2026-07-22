@@ -23,7 +23,7 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
   -> FastAPI 鉴权与用户会话隔离
   -> 隐私脱敏、医疗风险与轻量意图识别
   -> 最小化患者事实 + 私有病历证据 + Recent Messages + Persistent Note + 语义/情景记忆
-  -> 咨询预检：HIGH_RISK / PATIENT_DATA_MISSING / ANSWER
+  -> Health Agent 状态机：接收、规划、患者上下文、信息检查、证据评级、动作决策、执行持久化
   -> LangGraph 复杂度路由与纠错检索
   -> Milvus BGE-M3 Dense + 原生 BM25 + RRF
   -> 可选 Reranker、Neo4j KG 和医院导航工具
@@ -40,7 +40,7 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - 配置只从本地 `.env` 读取，代码和 Git 历史不保存真实密钥。
 - 公共知识和患者病历分别进入独立 Milvus collection，患者原文件按 tenant/patient/document 分域。
 - 患者文档先生成待审核候选事实；只有用户确认后才写入 FHIR-like 事实与临床时间轴。
-- 长期任务先创建待确认草稿，确认后由幂等调度器生成到期运行记录。
+- 长期任务先创建待确认草稿；确认后由 PostgreSQL 持久队列入队、领取、执行、退避重试，并生成站内通知。
 
 ### R - Result
 
@@ -50,14 +50,15 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - BGE-M3、Milvus 2.5+ 原生 BM25、Hybrid RRF、三级父子分块与检索降级。
 - MinerU/PDF/OCR 解析降级、渐进式向量入库与批量 Milvus 写入。
 - Neo4j 医疗知识图谱工具、语义/情景记忆、上下文压缩和医疗安全规则。
-- tenant/patient 数据边界、患者私有 RAG、候选事实审核、FHIR-like 患者事实、来源可追溯时间轴和长期任务基础。
-- 确定性咨询预检、Evidence State/Action Trace 与高风险 LLM 旁路。
-- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 70 项通过。
+- tenant/patient 数据边界、患者私有 RAG、候选事实审核、FHIR-like 患者事实和来源可追溯时间轴。
+- LangGraph 咨询状态机、统一 Evidence State/Action Policy、高风险 LLM 旁路、无证据拦截和工具调用审计。
+- 健康目标、提醒/随访/测量/周期摘要/目标检查任务、持久化执行、指数退避重试和站内通知。
+- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 79 项通过。
 
 尚未完成、不得对外宣称已实现：
 
-- 完整咨询 Agent 的动态 Patient Tool 选择、Missing Information Checker 和 Action Policy。
-- 长期任务的短信/邮件/移动推送渠道，以及机构级多成员 tenant 权限。
+- 基于模型的动态 Patient Tool 选择和 Observation 趋势计算；当前为后端最小化查询与确定性规划。
+- 长期任务的短信、邮件、移动推送渠道，以及机构级多成员 tenant 权限。
 - 多模态向量、Any-to-Any 检索和临床级医学影像理解。
 
 详细证据见 `docs/CURRENT_IMPLEMENTATION_AUDIT.md` 和 `docs/METRIC_REPRODUCIBILITY_AUDIT.md`。
@@ -181,11 +182,10 @@ docker compose config
 ## 迭代路线
 
 1. 患者文档抽取 golden set 与字段级准确率评测。
-2. Patient Context Planner、动态 Typed Tools 和主动追问。
-3. Evidence State、Action Policy 与咨询状态机。
-4. 长期任务的通知渠道、健康目标和周期摘要。
-5. 在硬件或外部推理资源满足后开展多模态 POC。
-6. 检索、生成、Agent、抽取、安全和性能消融评测。
+2. 动态 Typed Patient Tools、Observation 趋势计算和更细粒度主动追问。
+3. 短信、邮件或移动推送适配器及通知回执。
+4. 在硬件或外部推理资源满足后开展多模态 POC。
+5. 检索、生成、Agent、抽取、安全和性能消融评测。
 
 ## License
 

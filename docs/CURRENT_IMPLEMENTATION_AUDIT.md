@@ -20,9 +20,9 @@
 | 文档候选事实审核 | IMPLEMENTED | `patient_fact_candidates`、`backend/patient/fact_candidates.py`、`HealthRecordWorkspace.vue` | 本地规则默认运行；外部 LLM 增强必须显式同意，仍需临床抽取 golden set |
 | 患者健康时间轴 | IMPLEMENTED | `patient_timeline_events`、`get_patient_timeline` | 按 effective_at 排序；自然语言模糊时间抽取尚未实现 |
 | Typed Patient Tools | PARTIAL | `backend/patient/tools.py` | 读取事实/时间轴和提醒草稿已实现；趋势计算等接口仍保留为 unavailable |
-| 长期健康任务 | PARTIAL | `health_tasks`、`health_task_runs`、scheduler 与 API | 幂等、确认、取消和跨会话恢复已实现；外部通知渠道尚未实现 |
-| LangGraph RAG 图 | IMPLEMENTED | `backend/rag/pipeline.py` 的 `build_rag_graph` 与子图 | 这是检索图，不是完整 Health Agent 咨询状态机 |
-| 咨询 Orchestrator | PARTIAL | `backend/agent/planner.py`、`chat/service.py` | 高风险旁路、缺失字段追问和 Evidence State 已接入；动态患者工具规划尚未完成 |
+| 长期健康任务 | IMPLEMENTED | `health_tasks`、`health_task_runs`、`health_notifications`、scheduler 与 API | 五类任务、确认、持久化入队、领取、退避重试、等待输入、周期摘要和站内通知已实现；外部推送渠道未实现 |
+| LangGraph RAG 图 | IMPLEMENTED | `backend/rag/pipeline.py` 的 `build_rag_graph` 与子图 | 负责公共证据检索，作为咨询状态机内的检索能力运行 |
+| 咨询 Orchestrator | IMPLEMENTED | `backend/agent/orchestrator.py`、`chat/service.py` | RECEIVE 到 COMPLETED 的八阶段轨迹、Evidence State、Action Policy、无证据/冲突/高风险策略已接入；模型动态选择 Patient Tool 仍未实现 |
 | Recent Messages | IMPLEMENTED | `backend/rag/context_compression.py`、`backend/chat/service.py` | 窗口策略较简单 |
 | Persistent Note | PARTIAL | `backend/chat/service.py` 的笔记生成与注入 | LLM 摘要未结构化、无事实可信状态 |
 | 语义/情景记忆 | PARTIAL | `backend/memory/service.py`、两类 Milvus collection | 已强制 tenant/patient 过滤并标记未核验；仍缺过期、确认和撤回流程 |
@@ -40,12 +40,12 @@
 | PaddleOCR / PP-Structure | PARTIAL | `backend/indexing/ocr.py` | 可选重依赖；测试主要验证路由与容错，不是临床字段准确率 |
 | VLM fallback | NOT_FOUND | 无 VLM 调用实现 | 仅在目标架构中规划 |
 | 多模态向量 | NOT_FOUND | 无视觉 collection 或跨模态 embedding | 4GB GPU 环境下延期 POC |
-| PostgreSQL 数据模型 | IMPLEMENTED | 会话、文档、患者事实、时间轴和长期任务模型 | 高并发调度、字段加密与完整 FHIR 映射尚未实现 |
+| PostgreSQL 数据模型 | IMPLEMENTED | 会话、文档、患者事实、时间轴、目标、任务运行和通知模型 | 任务领取使用 PostgreSQL `SKIP LOCKED`；字段加密与完整 FHIR 映射尚未实现 |
 | Redis 缓存 | PARTIAL | `backend/infra/cache.py`、父块缓存 | 无完整任务状态、查询缓存治理和缓存一致性审计 |
 | Neo4j 医疗 KG | PARTIAL | `backend/kg/client.py`、`search_medical_kg` | 查询工具已接入；实际图数据完整性取决于外部实例 |
-| 医疗安全规则 | PARTIAL | `backend/medical_nlp/safety.py` | 规则型高风险与剂量提示，不是完整 Action Policy |
+| 医疗安全规则 | PARTIAL | `backend/medical_nlp/safety.py`、`backend/agent/orchestrator.py` | 高风险、缺失信息、无证据和冲突已进入 Action Policy；规则覆盖仍不是临床决策系统 |
 | PII 脱敏 | PARTIAL | 手机号、身份证、邮箱等规则 | 尚无 PII NER、全日志二次扫描和字段级加密 |
-| 冲突提示 | PARTIAL | `backend/rag/conflict.py` | 能提示证据限制，尚无统一 Evidence State |
+| 冲突提示 | IMPLEMENTED | `backend/rag/conflict.py`、`backend/agent/orchestrator.py` | KG/向量冲突进入统一 `CONFLICTING` Evidence State 并强制披露；医学冲突检测仍以规则为主 |
 | 医院导航 | PARTIAL | `backend/care_navigation/` | 依赖定位授权和外部地图/搜索服务 |
 | RAGCare 评测框架 | IMPLEMENTED | dataset、retrieval、metrics、judge、runner、测试 | 目标仓库不包含原始 420 条和正式结果 |
 | 正式 RAGAS 代码 | IMPLEMENTED | `backend/evaluation/ragas_*`、评测脚本 | 当前目标仓库未发现可复现正式结果 |
@@ -68,7 +68,7 @@ System Prompt
 → 工具返回的向量/KG/导航证据
 ```
 
-当前已有规则版 `required_patient_fields`、受控患者工具、确定性高风险旁路和 Evidence State；尚未完成动态患者工具规划、完整 Missing Information Checker 与全部 Action Policy。
+当前已有规则版 `required_patient_fields`、最小化患者上下文查询、确定性高风险旁路、统一 Evidence State 和 Action Policy。动态模型选择患者工具与复杂 Observation 趋势工具仍待实现。
 
 ## 当前数据结构
 
@@ -76,8 +76,8 @@ PostgreSQL 已增加 tenant、patient、document、fact candidate、FHIR-like fa
 
 ## 测试覆盖判断
 
-迁移前基线为 35 项，Phase 0 为 39 项；当前为 70 项通过。新增覆盖加法迁移/无损回滚、跨患者文档/候选/事实隔离、候选确认幂等、临床时间轴、工具合约、任务幂等、认证 HTTP 流程、咨询预检、高风险 LLM 旁路、embedding 单条合约、Milvus flush 和 Sparse 降级。2026-07-22 已在真实旧 PostgreSQL/Milvus 上完成两阶段加法迁移、计数守恒、幂等执行、独立患者 collection、`/health`、本地 BGE-M3 患者文档和候选事实冒烟验收。缺口包括真实患者 PDF/OCR 与事实抽取质量、安全攻击集、患者召回 golden set 和完整 Health Agent 状态决策。
+迁移前基线为 35 项，Phase 0 为 39 项；当前为 79 项通过。新增覆盖三阶段加法迁移、跨患者数据/API 隔离、八阶段咨询状态机、无证据策略、工具审计、任务幂等、故障重试、周期摘要、等待输入、目标与通知。2026-07-22 已在真实旧 PostgreSQL/Milvus 上完成三阶段加法迁移、备份校验、独立患者 collection、本地 BGE-M3 患者文档和候选事实冒烟验收。缺口包括真实患者 PDF/OCR 抽取质量、安全攻击集、患者召回 golden set、动态 Patient Tool 选择和外部通知渠道。
 
 ## 下一步
 
-下一步优先建设患者文档检索 golden set、动态 Patient Tool 规划、完整 Agent Evidence State 与安全攻击集；在此之前仍不得描述为“完整个人健康管理 Agent”。
+下一步优先建设患者文档检索 golden set、动态 Patient Tool 规划、Observation 趋势工具、安全攻击集和外部通知适配器；在完成临床数据验证前仍不得描述为临床诊疗系统。

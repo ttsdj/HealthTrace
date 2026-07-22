@@ -75,4 +75,42 @@ export interface HealthTask {
   timezone: string;
   interval_seconds: number | null;
   confirmation_required: boolean;
+  consecutive_failures: number;
+  last_run_at: string | null;
+}
+
+export interface HealthTaskRun {
+  run_id: string;
+  task_id: string;
+  status: string;
+  scheduled_for: string;
+  result: Record<string, unknown>;
+  error_message: string;
+  attempt_count: number;
+  max_attempts: number;
+  next_retry_at: string | null;
+}
+
+export interface HealthGoal {
+  goal_id: string;
+  title: string;
+  description: string;
+  status: string;
+  target: Record<string, unknown>;
+  progress: Record<string, unknown>;
+  starts_at: string | null;
+  due_at: string | null;
+}
+
+export interface HealthNotification {
+  notification_id: string;
+  notification_type: string;
+  title: string;
+  body: string;
+  status: string;
+  task_id: string | null;
+  run_id: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+  read_at: string | null;
 }

@@ -2,7 +2,10 @@ import { defineStore } from 'pinia';
 import api from '@/utils/api';
 import type {
   FactCandidate,
+  HealthGoal,
+  HealthNotification,
   HealthTask,
+  HealthTaskRun,
   PatientDocument,
   PatientFact,
   TimelineEvent,
@@ -18,6 +21,9 @@ export const useHealthRecordStore = defineStore('healthRecords', {
     facts: [] as PatientFact[],
     timeline: [] as TimelineEvent[],
     tasks: [] as HealthTask[],
+    taskRuns: [] as HealthTaskRun[],
+    goals: [] as HealthGoal[],
+    notifications: [] as HealthNotification[],
     loading: false,
     uploading: false,
     activeOperations: {} as Record<string, boolean>,
@@ -26,7 +32,8 @@ export const useHealthRecordStore = defineStore('healthRecords', {
 
   getters: {
     pendingCandidates: (state) => state.candidates.filter((item) => item.status === 'pending'),
-    activeTasks: (state) => state.tasks.filter((item) => !['cancelled', 'completed'].includes(item.status)),
+    activeTasks: (state) => state.tasks.filter((item) => !['cancelled', 'completed', 'failed'].includes(item.status)),
+    unreadNotifications: (state) => state.notifications.filter((item) => item.status === 'unread'),
   },
 
   actions: {
@@ -34,18 +41,24 @@ export const useHealthRecordStore = defineStore('healthRecords', {
       this.loading = true;
       this.lastError = '';
       try {
-        const [documents, candidates, facts, timeline, tasks] = await Promise.all([
+        const [documents, candidates, facts, timeline, tasks, taskRuns, goals, notifications] = await Promise.all([
           api.get('/patient/documents'),
           api.get('/patient/fact-candidates'),
           api.get('/patient/facts'),
           api.get('/patient/timeline'),
           api.get('/patient/tasks'),
+          api.get('/patient/tasks/runs'),
+          api.get('/patient/goals'),
+          api.get('/patient/notifications'),
         ]);
         this.documents = documents.data.documents || [];
         this.candidates = candidates.data.candidates || [];
         this.facts = facts.data.facts || [];
         this.timeline = timeline.data.events || [];
         this.tasks = tasks.data.tasks || [];
+        this.taskRuns = taskRuns.data.runs || [];
+        this.goals = goals.data.goals || [];
+        this.notifications = notifications.data.notifications || [];
       } catch (error: any) {
         this.lastError = messageFromError(error, '加载健康档案失败');
         throw new Error(this.lastError);
@@ -142,6 +155,31 @@ export const useHealthRecordStore = defineStore('healthRecords', {
 
     async cancelTask(taskId: string) {
       await api.post(`/patient/tasks/${encodeURIComponent(taskId)}/cancel`);
+      await this.loadAll();
+    },
+
+    async createGoal(payload: Record<string, unknown>) {
+      await api.post('/patient/goals', payload);
+      await this.loadAll();
+    },
+
+    async archiveGoal(goalId: string) {
+      await api.post(`/patient/goals/${encodeURIComponent(goalId)}/archive`);
+      await this.loadAll();
+    },
+
+    async markNotificationRead(notificationId: string) {
+      await api.post(`/patient/notifications/${encodeURIComponent(notificationId)}/read`);
+      await this.loadAll();
+    },
+
+    async retryTaskRun(runId: string) {
+      await api.post(`/patient/tasks/runs/${encodeURIComponent(runId)}/retry`);
+      await this.loadAll();
+    },
+
+    async submitTaskRunInput(runId: string, values: Record<string, unknown>) {
+      await api.post(`/patient/tasks/runs/${encodeURIComponent(runId)}/input`, { values });
       await this.loadAll();
     },
   },

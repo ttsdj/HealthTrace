@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -8,6 +8,7 @@ from backend.app import create_app
 from backend.db.models import DocumentRecord, ParentChunk, User
 from backend.infra.auth import get_db
 from backend.infra.database import Base
+from backend.tasks.service import execute_ready_task_runs, process_due_tasks
 
 
 def test_authenticated_patient_fact_timeline_and_task_flow(tmp_path):
@@ -161,3 +162,72 @@ def test_document_candidate_confirmation_is_scoped_end_to_end(tmp_path):
     assert len(client.get("/patient/facts", headers=alice_headers).json()["facts"]) == 1
     assert len(client.get("/patient/timeline", headers=alice_headers).json()["events"]) == 1
     assert client.get("/patient/facts", headers=bob_headers).json()["facts"] == []
+
+
+def test_goal_task_run_and_notification_apis_are_patient_scoped(tmp_path):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'long-term-api-flow.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    TestSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+    def override_get_db():
+        db = TestSession()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app = create_app()
+    app.dependency_overrides[get_db] = override_get_db
+    client = TestClient(app)
+    alice = client.post(
+        "/auth/register",
+        json={"username": "task-alice", "password": "example-test-password"},
+    ).json()
+    bob = client.post(
+        "/auth/register",
+        json={"username": "task-bob", "password": "example-test-password"},
+    ).json()
+    alice_headers = {"Authorization": f"Bearer {alice['access_token']}"}
+    bob_headers = {"Authorization": f"Bearer {bob['access_token']}"}
+
+    goal = client.post(
+        "/patient/goals",
+        headers=alice_headers,
+        json={
+            "title": "控制血压",
+            "target": {"operator": "lte", "value": 130, "unit": "mmHg"},
+            "idempotency_key": "api-goal-blood-pressure",
+        },
+    )
+    assert goal.status_code == 200
+    assert client.get("/patient/goals", headers=bob_headers).json()["goals"] == []
+
+    due = datetime.utcnow() - timedelta(minutes=1)
+    task = client.post(
+        "/patient/tasks",
+        headers=alice_headers,
+        json={
+            "task_type": "reminder",
+            "title": "记录血压",
+            "due_at": due.isoformat(),
+            "idempotency_key": "api-executable-reminder",
+        },
+    ).json()
+    client.post(f"/patient/tasks/{task['task_id']}/confirm", headers=alice_headers)
+    with TestSession() as db:
+        execution_time = datetime.utcnow() + timedelta(minutes=1)
+        process_due_tasks(db, now=execution_time)
+        execute_ready_task_runs(db, now=execution_time)
+        db.commit()
+
+    alice_notices = client.get("/patient/notifications", headers=alice_headers).json()["notifications"]
+    assert len(alice_notices) == 1
+    assert client.get("/patient/notifications", headers=bob_headers).json()["notifications"] == []
+    notice_id = alice_notices[0]["notification_id"]
+    assert client.post(f"/patient/notifications/{notice_id}/read", headers=bob_headers).status_code == 404
+    marked = client.post(f"/patient/notifications/{notice_id}/read", headers=alice_headers)
+    assert marked.status_code == 200
+    assert marked.json()["status"] == "read"

@@ -1,7 +1,10 @@
 import os
+import time
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
+
+from backend.agent.tool_audit import record_tool_call
 
 from backend.tools import (
     get_current_weather,
@@ -88,6 +91,54 @@ class SimpleAgent:
         self.tools = TOOL_BY_NAME
         self.system_prompt = system_prompt
 
+    @staticmethod
+    def _is_transient(error: Exception) -> bool:
+        message = str(error).lower()
+        return any(
+            marker in message
+            for marker in ("timeout", "timed out", "connection", "429", "502", "503", "504")
+        )
+
+    def _invoke_tool(self, name: str, tool, arguments: dict) -> str:
+        if tool is None:
+            record_tool_call(
+                tool_name=name,
+                arguments=arguments,
+                attempt=1,
+                status="not_found",
+                latency_ms=0,
+                error_type="ToolNotFound",
+            )
+            return f"Tool '{name}' not found."
+
+        max_attempts = 2
+        for attempt in range(1, max_attempts + 1):
+            started = time.perf_counter()
+            try:
+                observation = str(tool.invoke(arguments))
+                record_tool_call(
+                    tool_name=name,
+                    arguments=arguments,
+                    attempt=attempt,
+                    status="ok",
+                    latency_ms=round((time.perf_counter() - started) * 1000),
+                )
+                return observation
+            except Exception as exc:
+                transient = self._is_transient(exc)
+                record_tool_call(
+                    tool_name=name,
+                    arguments=arguments,
+                    attempt=attempt,
+                    status="retryable_error" if transient and attempt < max_attempts else "failed",
+                    latency_ms=round((time.perf_counter() - started) * 1000),
+                    error_type=type(exc).__name__,
+                )
+                if not transient or attempt >= max_attempts:
+                    return f"工具调用失败：{type(exc).__name__}"
+                time.sleep(0.05 * attempt)
+        return "工具调用失败：unknown"
+
     def invoke(self, input_data: dict, config: dict = None) -> dict:
         messages = input_data.get("messages", [])
         full_messages = [SystemMessage(content=self.system_prompt)] + list(messages)
@@ -102,13 +153,7 @@ class SimpleAgent:
             full_messages.append(result)
             for tc in result.tool_calls:
                 tool = self.tools.get(tc["name"])
-                if tool is None:
-                    obs = f"Tool '{tc['name']}' not found."
-                else:
-                    try:
-                        obs = str(tool.invoke(tc["args"]))
-                    except Exception as e:
-                        obs = f"工具调用失败：{e}"
+                obs = self._invoke_tool(tc["name"], tool, tc["args"])
                 full_messages.append(ToolMessage(content=obs, tool_call_id=tc["id"]))
 
             result = self.model.invoke(full_messages)
@@ -176,13 +221,7 @@ class SimpleAgent:
             full_messages.append(gathered)
             for tc in tc_list:
                 tool = self.tools.get(tc["name"])
-                if tool is None:
-                    obs = f"Tool '{tc['name']}' not found."
-                else:
-                    try:
-                        obs = str(tool.invoke(tc["args"]))
-                    except Exception as e:
-                        obs = f"工具调用失败：{e}"
+                obs = self._invoke_tool(tc["name"], tool, tc["args"])
                 tc_id = tc.get("id", "")
                 full_messages.append(ToolMessage(content=obs, tool_call_id=tc_id if tc_id else None))
 

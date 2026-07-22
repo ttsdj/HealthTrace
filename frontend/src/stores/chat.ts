@@ -286,6 +286,11 @@ export const useChatStore = defineStore('chat', {
                   msg.isThinking = false;
                   msg.text += data.content;
                 });
+              } else if (data.type === 'content_replace') {
+                updateVisibleAssistant((msg) => {
+                  msg.isThinking = false;
+                  msg.text = data.content;
+                });
               } else if (data.type === 'trace') {
                 updateVisibleAssistant((msg) => {
                   msg.ragTrace = data.rag_trace;

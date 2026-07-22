@@ -4,7 +4,8 @@ import os
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 
-from backend.agent.planner import finalize_evidence_state, plan_consultation, preflight_response
+from backend.agent.orchestrator import finalize_consultation, prepare_consultation
+from backend.agent.tool_audit import get_tool_audit, reset_tool_audit
 from backend.care_navigation.context import LocationContext, use_location_context
 from backend.care_navigation.triage import assess_care_navigation_need
 from backend.chat.runtime import agent, fast_model
@@ -13,7 +14,7 @@ from backend.chat.rag_context import get_last_rag_context
 from backend.chat.streaming import set_rag_step_queue
 from backend.memory import memory_service
 from backend.medical_nlp.safety import analyze_medical_safety, redact_sensitive_text
-from backend.patient.context import build_verified_patient_context
+from backend.patient.context import build_verified_patient_context  # compatibility extension point
 from backend.rag.context_compression import summarize_history_window
 from backend.tools import reset_knowledge_tool_calls
 
@@ -263,20 +264,17 @@ def chat_with_agent(
 
     get_last_rag_context(clear=True)
     reset_knowledge_tool_calls()
+    reset_tool_audit()
     trace_base = _build_trace_base(messages, user_text, location_context)
     redacted_user_text, privacy_meta = redact_sensitive_text(user_text)
-    consultation_plan = plan_consultation(user_id, redacted_user_text)
-    trace_base.update(consultation_plan.trace_fields())
-    guarded_response = preflight_response(consultation_plan)
+    consultation_state = prepare_consultation(user_id, session_id, redacted_user_text)
+    guarded_response = consultation_state.get("guarded_response", "")
 
     if guarded_response:
         memory_hits = {}
         memory_note = ""
-        patient_context = ""
-        patient_context_meta = {
-            "patient_context_accessed": False,
-            "reason": "preflight_guarded",
-        }
+        patient_context = consultation_state.get("patient_context", "")
+        patient_context_meta = consultation_state.get("patient_context_meta", {})
     else:
         try:
             memory_hits = memory_service.retrieve(user_text, user_id, session_id)
@@ -286,9 +284,8 @@ def chat_with_agent(
             memory_hits = {}
             memory_note = ""
 
-        patient_context, patient_context_meta = build_verified_patient_context(
-            user_id, redacted_user_text
-        )
+        patient_context = consultation_state.get("patient_context", "")
+        patient_context_meta = consultation_state.get("patient_context_meta", {})
     trace_base.update(patient_context_meta)
     if patient_context:
         memory_note = f"{patient_context}\n{memory_note}".strip()
@@ -305,6 +302,7 @@ def chat_with_agent(
     messages.append(HumanMessage(content=redacted_user_text))
     storage.save(user_id, session_id, messages)
 
+    fallback_error = ""
     if guarded_response:
         result = {"output": guarded_response, "preflight_guarded": True}
     else:
@@ -316,6 +314,7 @@ def chat_with_agent(
                 )
         except Exception as exc:
             print(f"Agent invocation fallback activated: {exc!r}")
+            fallback_error = str(exc)
             result = {
                 "output": _safe_degraded_medical_response(user_text, _friendly_model_error(exc)),
                 "fallback_error": str(exc),
@@ -341,17 +340,24 @@ def chat_with_agent(
             "agent returned an empty response",
         )
 
+    rag_context = get_last_rag_context(clear=True)
+    rag_trace = rag_context.get("rag_trace") if rag_context else None
+    trace_base.update(privacy_meta)
+    rag_trace = _merge_trace_base(rag_trace, trace_base)
+    rag_trace["tool_calls"] = get_tool_audit(clear=True)
+    response_content, rag_trace = finalize_consultation(
+        consultation_state,
+        rag_trace,
+        response_content,
+        fallback_error=fallback_error,
+    )
+
     messages.append(AIMessage(content=response_content))
     try:
         memory_service.store_turn(user_id, session_id, redacted_user_text, response_content)
     except Exception as e:
         print(f"Memory write error: {e}")
 
-    rag_context = get_last_rag_context(clear=True)
-    rag_trace = rag_context.get("rag_trace") if rag_context else None
-    trace_base.update(privacy_meta)
-    rag_trace = _merge_trace_base(rag_trace, trace_base)
-    rag_trace = finalize_evidence_state(rag_trace)
     if rag_trace is not None:
         rag_trace["memory_hits"] = {
             key: len(value)
@@ -409,11 +415,11 @@ async def chat_with_agent_stream(
 
     get_last_rag_context(clear=True)
     reset_knowledge_tool_calls()
+    reset_tool_audit()
     trace_base = _build_trace_base(messages, user_text, location_context)
     redacted_user_text, privacy_meta = redact_sensitive_text(user_text)
-    consultation_plan = plan_consultation(user_id, redacted_user_text)
-    trace_base.update(consultation_plan.trace_fields())
-    guarded_response = preflight_response(consultation_plan)
+    consultation_state = prepare_consultation(user_id, session_id, redacted_user_text)
+    guarded_response = consultation_state.get("guarded_response", "")
 
     output_queue = asyncio.Queue()
 
@@ -426,11 +432,8 @@ async def chat_with_agent_stream(
     if guarded_response:
         memory_hits = {}
         memory_note = ""
-        patient_context = ""
-        patient_context_meta = {
-            "patient_context_accessed": False,
-            "reason": "preflight_guarded",
-        }
+        patient_context = consultation_state.get("patient_context", "")
+        patient_context_meta = consultation_state.get("patient_context_meta", {})
     else:
         try:
             memory_hits = memory_service.retrieve(user_text, user_id, session_id)
@@ -440,9 +443,8 @@ async def chat_with_agent_stream(
             memory_hits = {}
             memory_note = ""
 
-        patient_context, patient_context_meta = build_verified_patient_context(
-            user_id, redacted_user_text
-        )
+        patient_context = consultation_state.get("patient_context", "")
+        patient_context_meta = consultation_state.get("patient_context_meta", {})
     trace_base.update(patient_context_meta)
     if patient_context:
         memory_note = f"{patient_context}\n{memory_note}".strip()
@@ -475,9 +477,10 @@ async def chat_with_agent_stream(
         title_task.add_done_callback(_on_title_done)
 
     full_response = ""
+    agent_error = ""
 
     async def _agent_worker():
-        nonlocal full_response
+        nonlocal full_response, agent_error
         try:
             if guarded_response:
                 full_response = guarded_response
@@ -508,6 +511,7 @@ async def chat_with_agent_stream(
                         full_response += content
                         await output_queue.put({"type": "content", "content": content})
         except Exception as e:
+            agent_error = str(e)
             if not full_response:
                 try:
                     loop = asyncio.get_running_loop()
@@ -558,7 +562,16 @@ async def chat_with_agent_stream(
     rag_trace = rag_context.get("rag_trace") if rag_context else None
     trace_base.update(privacy_meta)
     rag_trace = _merge_trace_base(rag_trace, trace_base)
-    rag_trace = finalize_evidence_state(rag_trace)
+    rag_trace["tool_calls"] = get_tool_audit(clear=True)
+    finalized_response, rag_trace = finalize_consultation(
+        consultation_state,
+        rag_trace,
+        full_response,
+        fallback_error=agent_error,
+    )
+    if finalized_response != full_response:
+        full_response = finalized_response
+        yield f"data: {json.dumps({'type': 'content_replace', 'content': full_response})}\n\n"
     if rag_trace is not None:
         rag_trace["memory_hits"] = {
             key: len(value)
