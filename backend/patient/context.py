@@ -17,7 +17,10 @@ def should_query_patient_context(query: str) -> bool:
 def required_resource_types(query: str) -> list[str]:
     text = query or ""
     required: list[str] = []
-    if any(marker in text for marker in ("药", "服用", "剂量", "停药")):
+    if any(
+        marker in text
+        for marker in ("药", "服用", "剂量", "停药", "能不能吃", "可以吃", "正在吃")
+    ):
         required.extend(["AllergyIntolerance", "MedicationStatement", "Condition"])
     if any(marker in text for marker in ("检查", "指标", "血压", "血糖", "化验")):
         required.extend(["Observation", "DiagnosticReport"])

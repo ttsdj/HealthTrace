@@ -30,7 +30,7 @@ def test_authenticated_patient_fact_timeline_and_task_flow(tmp_path):
 
     register = client.post(
         "/auth/register",
-        json={"username": "api-user", "password": "safe-test-password"},
+        json={"username": "api-user", "password": "example-test-password"},
     )
     assert register.status_code == 200
     auth = register.json()

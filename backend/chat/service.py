@@ -4,6 +4,7 @@ import os
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 
+from backend.agent.planner import finalize_evidence_state, plan_consultation, preflight_response
 from backend.care_navigation.context import LocationContext, use_location_context
 from backend.care_navigation.triage import assess_care_navigation_need
 from backend.chat.runtime import agent, fast_model
@@ -264,6 +265,9 @@ def chat_with_agent(
     reset_knowledge_tool_calls()
     trace_base = _build_trace_base(messages, user_text, location_context)
     redacted_user_text, privacy_meta = redact_sensitive_text(user_text)
+    consultation_plan = plan_consultation(user_id, redacted_user_text)
+    trace_base.update(consultation_plan.trace_fields())
+    guarded_response = preflight_response(consultation_plan)
 
     try:
         memory_hits = memory_service.retrieve(user_text, user_id, session_id)
@@ -292,18 +296,21 @@ def chat_with_agent(
     messages.append(HumanMessage(content=redacted_user_text))
     storage.save(user_id, session_id, messages)
 
-    try:
-        with use_location_context(location_context):
-            result = agent.invoke(
-                {"messages": context_messages},
-                config={"recursion_limit": 8},
-            )
-    except Exception as exc:
-        print(f"Agent invocation fallback activated: {exc!r}")
-        result = {
-            "output": _safe_degraded_medical_response(user_text, _friendly_model_error(exc)),
-            "fallback_error": str(exc),
-        }
+    if guarded_response:
+        result = {"output": guarded_response, "preflight_guarded": True}
+    else:
+        try:
+            with use_location_context(location_context):
+                result = agent.invoke(
+                    {"messages": context_messages},
+                    config={"recursion_limit": 8},
+                )
+        except Exception as exc:
+            print(f"Agent invocation fallback activated: {exc!r}")
+            result = {
+                "output": _safe_degraded_medical_response(user_text, _friendly_model_error(exc)),
+                "fallback_error": str(exc),
+            }
 
     response_content = ""
     if isinstance(result, dict):
@@ -335,6 +342,7 @@ def chat_with_agent(
     rag_trace = rag_context.get("rag_trace") if rag_context else None
     trace_base.update(privacy_meta)
     rag_trace = _merge_trace_base(rag_trace, trace_base)
+    rag_trace = finalize_evidence_state(rag_trace)
     if rag_trace is not None:
         rag_trace["memory_hits"] = {
             key: len(value)
@@ -394,6 +402,9 @@ async def chat_with_agent_stream(
     reset_knowledge_tool_calls()
     trace_base = _build_trace_base(messages, user_text, location_context)
     redacted_user_text, privacy_meta = redact_sensitive_text(user_text)
+    consultation_plan = plan_consultation(user_id, redacted_user_text)
+    trace_base.update(consultation_plan.trace_fields())
+    guarded_response = preflight_response(consultation_plan)
 
     output_queue = asyncio.Queue()
 
@@ -450,6 +461,10 @@ async def chat_with_agent_stream(
     async def _agent_worker():
         nonlocal full_response
         try:
+            if guarded_response:
+                full_response = guarded_response
+                await output_queue.put({"type": "content", "content": guarded_response})
+                return
             with use_location_context(location_context):
                 async for msg, _metadata in agent.astream(
                     {"messages": context_messages},
@@ -525,6 +540,7 @@ async def chat_with_agent_stream(
     rag_trace = rag_context.get("rag_trace") if rag_context else None
     trace_base.update(privacy_meta)
     rag_trace = _merge_trace_base(rag_trace, trace_base)
+    rag_trace = finalize_evidence_state(rag_trace)
     if rag_trace is not None:
         rag_trace["memory_hits"] = {
             key: len(value)

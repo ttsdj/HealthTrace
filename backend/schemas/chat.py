@@ -105,6 +105,15 @@ class RagTrace(BaseModel):
     ragas_quality_score: Optional[float] = None
     ragas_evaluation_mode: Optional[str] = None
     ragas_evaluation_note: Optional[str] = None
+    consultation_orchestrator_enabled: Optional[bool] = None
+    intent: Optional[str] = None
+    risk_level: Optional[str] = None
+    required_patient_fields: Optional[List[str]] = None
+    missing_fields: Optional[List[str]] = None
+    required_evidence_sources: Optional[List[str]] = None
+    evidence_state: Optional[str] = None
+    action: Optional[str] = None
+    action_reason: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
