@@ -17,6 +17,9 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.api import router
 from backend.infra.database import init_db
+from backend.jobs.worker import start_background_job_worker, stop_background_job_worker
+from backend.security.middleware import audit_request_middleware
+from backend.observability.telemetry import configure_telemetry
 from backend.tasks.scheduler import start_health_task_scheduler, stop_health_task_scheduler
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
@@ -34,18 +37,29 @@ def create_app() -> FastAPI:
                 raise
             print(f"Database startup initialization skipped: {exc}")
         start_health_task_scheduler()
+        start_background_job_worker()
 
     @app.on_event("shutdown")
     async def _shutdown_task_scheduler():
         await stop_health_task_scheduler()
+        await stop_background_job_worker()
 
+    cors_origins = [
+        item.strip()
+        for item in os.getenv(
+            "CORS_ORIGINS",
+            "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8000,http://localhost:8000",
+        ).split(",")
+        if item.strip()
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.middleware("http")(audit_request_middleware)
 
     @app.middleware("http")
     async def _no_cache(request, call_next):
@@ -58,6 +72,7 @@ def create_app() -> FastAPI:
         return response
 
     app.include_router(router)
+    configure_telemetry(app)
 
     if FRONTEND_DIR.exists():
         app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")

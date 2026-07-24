@@ -1,6 +1,7 @@
 services:
   app:
     container_name: healthtrace-app
+    image: ${HEALTHTRACE_IMAGE:-healthtrace:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -12,6 +13,8 @@ services:
       MILVUS_HOST: standalone
       MILVUS_PORT: "19530"
       HEALTHTRACE_INFRA_MODE: managed
+      HEALTHTRACE_AUTO_MIGRATE: "true"
+      STRICT_STARTUP: "true"
     ports:
       - "${HEALTHTRACE_BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -22,3 +25,11 @@ services:
       standalone:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/app:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health/ready"]
+      interval: 30s
+      timeout: 8s
+      start_period: 60s
+      retries: 5

@@ -39,11 +39,14 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - 大文档先写入首批页面或 chunk，使部分内容尽早可检索，剩余批次后台继续处理。
 - PostgreSQL 保存用户、会话和父块；Redis 缓存父块与短期状态；Milvus 保存叶子块与记忆；Neo4j 是可选增强服务。
 - 配置只从本地 `.env` 读取，代码和 Git 历史不保存真实密钥。
+- tenant 成员与患者授权分开管理；私密扩展字段使用 AES-256-GCM 信封加密，访问仅记录元数据审计，不记录对话或病历正文。
 - 公共知识和患者病历分别进入独立 Milvus collection，患者原文件按 tenant/patient/document 分域。
 - 患者文档先生成待审核候选事实；只有用户确认后才写入 FHIR-like 事实与临床时间轴。
-- 长期任务先创建待确认草稿；确认后由 PostgreSQL 持久队列入队、领取、执行、退避重试，并生成站内通知。
+- 文档解析、患者文档索引和正式评测进入 PostgreSQL 持久任务队列，支持并发领取、幂等、指数退避和故障恢复。
+- 长期任务先创建待确认草稿；确认后由 PostgreSQL 持久任务系统入队、领取、执行、退避重试，并生成站内通知。
 - 邮件/Webhook 采用站内通知先提交、外部通道后投递；必须显式同意，失败独立重试且不回滚任务。
 - 管理员可查看不含对话正文和患者标识的聚合可观测指标。
+- `/observability/metrics` 暴露低基数 Prometheus 指标；OTLP 链路出口按配置启用，未安装扩展时显式降级而不阻断主服务。
 
 ### R - Result
 
@@ -59,13 +62,17 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - 已验证 Observation 趋势、动态白名单 Patient Tool 规划及规划器失败回退。
 - 管理员运行监控面板：Evidence State、检索降级、工具成功率与 P50/P95、任务重试和 ragas_lite 信号。
 - 可选邮件/Webhook 通知适配器，具备显式同意、幂等、独立重试和站内 fallback。
+- 多成员 tenant、患者级 read/write/manage 授权、敏感字段加密和 metadata-only 审计日志。
+- PostgreSQL 持久后台任务队列，覆盖公共/患者文档、删除和正式 Agent 评测。
+- Golden set 导入、双人独立审核、临床审核门禁与批准版本导出；当前内置 42 条仍处于待人工审核状态。
+- Prometheus 指标、可选 OpenTelemetry、运行告警、liveness/readiness、容器构建与 GHCR 发布工作流。
 - 42 条 Health Agent 策略集覆盖高风险、缺信息、证据源、工具路由、隐私和边界，当前 42/42 通过。
-- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 90 项通过。
+- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 98 项通过。
 
 尚未完成、不得对外宣称已实现：
 
-- 短信、原生移动推送、机构级多成员 tenant 权限和外部通道真实供应商验收。
-- 临床人员审核的 Agent 安全集与患者 Observation 趋势 golden set。
+- 短信、原生移动推送和外部邮件/Webhook 真实供应商验收。
+- 临床人员批准的 Agent 安全集与患者 Observation 趋势 golden set；当前只完成审核工作流，不能把待审核用例称为临床 golden set。
 - 多模态向量、Any-to-Any 检索和临床级医学影像理解。
 
 详细证据见 `docs/CURRENT_IMPLEMENTATION_AUDIT.md` 和 `docs/METRIC_REPRODUCIBILITY_AUDIT.md`。
@@ -92,7 +99,15 @@ backend/chat          backend/rag      backend/indexing
 
 ### 1. 准备环境
 
-需要 Python 3.12、Node.js、Docker Desktop。Docker 仅在 `managed` 模式下必须由本项目启动。
+需要 Python 3.12、Node.js、Docker Desktop。Docker 仅在 `managed` 模式下必须由本项目启动。Windows 新机器可直接运行：
+
+```cmd
+setup.bat
+```
+
+该脚本创建 `.venv`、安装后端与前端依赖、从 `.env.example` 生成本地 `.env`，并自动生成 JWT 与字段加密密钥。随后填写 LLM 配置即可。
+
+手动安装方式：
 
 ```cmd
 git clone <your-healthtrace-repository-url>
@@ -123,6 +138,7 @@ MODEL=your-model
 FAST_MODEL=your-fast-model
 GRADE_MODEL=your-grade-model
 JWT_SECRET_KEY=replace-with-a-long-random-value
+HEALTHTRACE_FIELD_ENCRYPTION_KEY=replace-with-url-safe-base64-32-byte-key
 ```
 
 基础设施模式：
@@ -187,10 +203,19 @@ docker compose -f docker-compose.yml -f docker-compose.app.yml up -d --build
 
 应用容器直接托管构建后的 Vue 页面，默认访问 `http://127.0.0.1:8000`。本地开发仍推荐使用 `start.bat`，便于前后端热更新。
 
-Phase 4 外部通知表为加法迁移，既有部署升级前执行：
+既有部署按顺序执行加法迁移：
 
 ```cmd
 .venv\Scripts\python.exe scripts\migrate_phase4_notifications.py apply
+.venv\Scripts\python.exe scripts\migrate_phase5_access_security.py apply
+.venv\Scripts\python.exe scripts\migrate_phase6_jobs_golden.py apply
+```
+
+生产启动前可运行：
+
+```cmd
+.venv\Scripts\python.exe scripts\production_preflight.py
+.venv\Scripts\python.exe scripts\deployment_smoke.py --base-url http://127.0.0.1:8000
 ```
 
 ## 数据与安全
@@ -201,14 +226,16 @@ Phase 4 外部通知表为加法迁移，既有部署升级前执行：
 - Neo4j、地图和 Reranker 是可选增强能力，失败时不得阻断普通知识检索。
 - 运行时 `ragas_lite` 是低成本启发式监控信号，不等于正式 RAGAS 评测结果。
 - 没有 gold evidence 的数据集不得报告 Recall@K。
+- Golden 数据必须经过独立审核门禁；仅导入或由规则生成的数据默认是 `draft`，不得作为临床准确性结论。
+- 字段加密密钥不得随意更换；生产环境应交给密钥管理服务并建立轮换、备份和灾难恢复流程。
 
 ## 迭代路线
 
-1. 患者文档抽取 golden set 与字段级准确率评测。
-2. 用真实患者纵向数据验证 Observation 趋势与主动追问策略。
-3. 短信/移动推送适配器、真实邮件/Webhook 供应商验收和通知回执。
-4. 在硬件或外部推理资源满足后开展多模态 POC。
-5. 检索、生成、Agent、抽取、安全和性能消融评测。
+1. 由临床人员审核并冻结患者文档抽取、Agent 安全和 Observation 趋势 golden set。
+2. 用经授权、去标识的纵向数据验证趋势、主动追问和证据冲突策略。
+3. 完成邮件/Webhook 供应商沙箱验收，再扩展短信、移动推送和通知回执。
+4. 接入集中式 KMS、日志平台、Prometheus/Grafana 与 OTLP Collector，完成恢复演练。
+5. 在硬件或外部推理资源满足后开展多模态 POC，并持续做检索、生成、Agent、安全和性能消融。
 
 ## License
 

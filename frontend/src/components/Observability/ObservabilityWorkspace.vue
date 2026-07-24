@@ -19,12 +19,20 @@
     <div v-if="store.error" class="ops-error"><i class="fas fa-circle-exclamation"></i>{{ store.error }}</div>
     <div v-else-if="!summary" class="ops-empty">正在读取聚合指标...</div>
     <template v-else>
+      <div v-if="store.alerts?.alert_count" class="ops-alerts" :class="store.alerts.status">
+        <div><i class="fas fa-triangle-exclamation"></i><strong>运行告警 {{ store.alerts.alert_count }} 项</strong></div>
+        <span v-for="item in store.alerts.alerts" :key="item.code">{{ alertLabel(item.code) }}</span>
+      </div>
+      <div v-else class="ops-alerts ok">
+        <div><i class="fas fa-circle-check"></i><strong>当前没有触发运行告警</strong></div>
+      </div>
       <div class="ops-metrics">
         <div><span>可观测回合</span><strong>{{ summary.chat.trace_turns }}</strong><small>{{ rangeLabel }}</small></div>
         <div><span>检索降级率</span><strong>{{ percent(summary.chat.fallback_rate) }}</strong><small>{{ summary.chat.fallback_count }} 次降级</small></div>
         <div><span>工具成功率</span><strong>{{ percent(summary.tools.success_rate) }}</strong><small>{{ summary.tools.call_count }} 次调用</small></div>
         <div><span>工具 P95</span><strong>{{ duration(summary.tools.latency_p95_ms) }}</strong><small>P50 {{ duration(summary.tools.latency_p50_ms) }}</small></div>
         <div><span>任务重试率</span><strong>{{ percent(summary.tasks.retry_rate) }}</strong><small>{{ summary.tasks.run_count }} 次运行</small></div>
+        <div><span>持久化后台作业</span><strong>{{ summary.background_jobs.count }}</strong><small>{{ summary.background_jobs.retry_count }} 次发生重试</small></div>
       </div>
 
       <div class="ops-grid">
@@ -56,6 +64,14 @@
             <div v-if="!Object.keys(summary.tasks.status_counts).length"><span>暂无运行记录</span><strong>0</strong></div>
           </div>
         </section>
+
+        <section class="ops-section">
+          <div class="section-title"><div><small>DURABLE QUEUE</small><h2>后台队列与审计</h2></div><span>{{ summary.audit.event_count }} 条审计事件</span></div>
+          <div class="distribution-columns">
+            <DistributionList title="后台作业状态" :values="summary.background_jobs.status_counts" :total="summary.background_jobs.count" />
+            <DistributionList title="审计结果" :values="summary.audit.outcome_counts" :total="summary.audit.event_count" />
+          </div>
+        </section>
       </div>
 
       <footer class="privacy-foot"><i class="fas fa-shield-halved"></i><span>聚合接口已关闭提示词正文与患者标识输出</span><time>更新于 {{ updatedAt }}</time></footer>
@@ -82,6 +98,14 @@ const qualityItems = computed(() => summary.value ? [
   { key: 'overall', label: '综合信号', value: summary.value.quality.ragas_quality_score },
 ] : []);
 const statusLabel = (status: string) => ({ completed: '已完成', failed: '失败', retry_wait: '等待重试', running: '运行中', ready: '待执行', waiting_input: '等待输入' }[status] || status);
+const alertLabel = (code: string) => ({
+  rag_fallback_rate_high: '检索降级率偏高',
+  tool_success_rate_low: '工具成功率偏低',
+  tool_latency_p95_high: '工具延迟偏高',
+  background_jobs_failed: '后台作业失败',
+  notification_deliveries_failed: '外部通知失败',
+  audited_requests_error: '接口出现服务端错误',
+}[code] || code);
 
 const DistributionList = defineComponent({
   props: { title: { type: String, required: true }, values: { type: Object as PropType<Record<string, number>>, required: true }, total: { type: Number, required: true } },
@@ -101,4 +125,5 @@ onMounted(() => store.load());
 
 <style scoped>
 .ops-workspace{height:100%;overflow:auto;background:#f5f8fb;color:#12243c;padding:32px 38px 44px;font-family:"Source Han Sans SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif}.ops-header{display:flex;align-items:flex-start;justify-content:space-between;gap:28px;padding-bottom:24px;border-bottom:1px solid #ccd9e5}.ops-kicker,.section-title small{color:#087b9d;font-size:12px;font-weight:900;letter-spacing:0}.ops-header h1{margin:7px 0 6px;font-size:30px;line-height:1.2}.ops-header p,.quality-section p{margin:0;color:#60738a;font-size:14px}.ops-commands{display:flex;gap:10px;align-items:center}.period-control{display:flex;border:1px solid #cbd8e5;border-radius:6px;background:#fff;overflow:hidden}.period-control button{height:39px;padding:0 13px;border:0;border-right:1px solid #dbe4ed;background:#fff;color:#50647c;font-weight:700;cursor:pointer}.period-control button:last-child{border-right:0}.period-control button.active{background:#e7f6f8;color:#067a95}.refresh-command{width:40px;height:40px;border:1px solid #cbd8e5;border-radius:6px;background:#fff;color:#087b9d;cursor:pointer}.ops-error,.ops-empty{margin-top:20px;padding:16px;border:1px solid #efc7c3;background:#fff6f5;color:#a23028;border-radius:6px}.ops-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));margin:24px 0;border:1px solid #d4dfe9;background:#fff;border-radius:7px;overflow:hidden}.ops-metrics>div{min-height:102px;padding:17px 18px;border-right:1px solid #e0e7ee}.ops-metrics>div:last-child{border-right:0}.ops-metrics span,.ops-metrics small,.quality-row span{display:block;color:#63758b;font-size:13px}.ops-metrics strong{display:block;margin:5px 0 3px;color:#102a46;font-size:27px}.ops-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,.65fr);border-top:1px solid #d4dfe9}.ops-section{padding:24px 0;border-bottom:1px solid #d4dfe9}.ops-section:nth-child(odd){padding-right:28px}.ops-section:nth-child(even){padding-left:28px;border-left:1px solid #d4dfe9}.quality-section{grid-column:1/-1!important;padding:24px 0!important;border-left:0!important}.section-title{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}.section-title h2{margin:4px 0 0;font-size:20px}.section-title>span{color:#65768b;font-size:13px}.distribution-columns{display:grid;grid-template-columns:1fr 1fr;gap:32px}.distribution-list h3{margin:0 0 13px;font-size:14px}.distribution-row{display:grid;grid-template-columns:minmax(100px,1fr) minmax(90px,1.4fr) 32px;align-items:center;gap:10px;margin:10px 0;font-size:13px}.distribution-row i,.quality-row i{height:7px;overflow:hidden;background:#dce5ed;border-radius:2px}.distribution-row b,.quality-row b{display:block;height:100%;background:#0a8eaa}.distribution-row strong{text-align:right}.distribution-list p{color:#7a899a}.heuristic-tag{padding:5px 8px;border:1px solid #e9cc8a;border-radius:5px;background:#fff8e8;color:#8a6200!important;font-weight:800}.quality-row{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid #d4dfe9;background:#fff}.quality-row>div{padding:17px 18px;border-right:1px solid #e0e7ee}.quality-row>div:last-child{border-right:0}.quality-row strong{display:block;margin:6px 0 10px;font-size:23px}.quality-section p{margin-top:10px}.job-strip{display:flex;flex-wrap:wrap;border:1px solid #d4dfe9;background:#fff}.job-strip>div{min-width:120px;flex:1;padding:15px;border-right:1px solid #e0e7ee}.job-strip span,.job-strip strong{display:block}.job-strip span{color:#63758b;font-size:12px}.job-strip strong{margin-top:4px;font-size:21px}.privacy-foot{display:flex;align-items:center;gap:9px;padding-top:18px;color:#557087;font-size:13px}.privacy-foot i{color:#0b8b7d}.privacy-foot time{margin-left:auto}.ops-error{display:flex;gap:8px}@media(max-width:1050px){.ops-metrics{grid-template-columns:repeat(2,1fr)}.ops-metrics>div{border-bottom:1px solid #e0e7ee}.ops-grid{grid-template-columns:1fr}.ops-section,.ops-section:nth-child(odd),.ops-section:nth-child(even){padding:22px 0;border-left:0}.quality-section{grid-column:1}.quality-row{grid-template-columns:1fr 1fr}}@media(max-width:700px){.ops-workspace{padding:22px 16px}.ops-header{display:block}.ops-commands{margin-top:16px}.ops-metrics,.distribution-columns,.quality-row{grid-template-columns:1fr}.period-control{flex:1}.period-control button{flex:1}.privacy-foot{align-items:flex-start;flex-wrap:wrap}.privacy-foot time{width:100%;margin-left:25px}}
+.ops-alerts{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:20px;padding:13px 15px;border:1px solid #eacb88;border-radius:7px;background:#fff8e8;color:#795700}.ops-alerts>div{display:flex;align-items:center;gap:8px}.ops-alerts span{padding:3px 7px;border-radius:4px;background:rgba(255,255,255,.75);font-size:12px;font-weight:700}.ops-alerts.critical{border-color:#efb4af;background:#fff1f0;color:#a52b23}.ops-alerts.ok{border-color:#a7ddca;background:#edf9f4;color:#087557}.ops-metrics{grid-template-columns:repeat(6,minmax(0,1fr))}@media(max-width:1200px){.ops-metrics{grid-template-columns:repeat(3,1fr)}}@media(max-width:1050px){.ops-metrics{grid-template-columns:repeat(2,1fr)}}@media(max-width:700px){.ops-metrics{grid-template-columns:1fr}}
 </style>

@@ -3,6 +3,7 @@ import socket
 from urllib.parse import urlparse
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from backend.infra.database import SessionLocal
@@ -143,6 +144,8 @@ def _patient_capabilities() -> dict:
     except Exception:
         migration_status = "unavailable"
         candidate_migration_status = "unavailable"
+    from backend.observability.telemetry import telemetry_status
+
     return {
         "patient_domains_enabled": os.getenv(
             "HEALTHTRACE_PATIENT_DOMAIN_ENABLED", "true"
@@ -159,6 +162,7 @@ def _patient_capabilities() -> dict:
         ).lower()
         == "true",
         "multimodal_retrieval_enabled": False,
+        "opentelemetry": telemetry_status(),
     }
 
 
@@ -184,3 +188,14 @@ async def health():
         "optional_services": optional_services,
         "capabilities": _patient_capabilities(),
     }
+
+
+@router.get("/health/live")
+async def liveness():
+    return {"service": "HealthTrace", "live": True}
+
+
+@router.get("/health/ready")
+async def readiness():
+    result = await health()
+    return JSONResponse(content=result, status_code=200 if result["ready"] else 503)

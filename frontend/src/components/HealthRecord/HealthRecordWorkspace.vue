@@ -38,7 +38,7 @@
         </div>
         <label class="primary-command" :class="{ disabled: store.uploading }">
           <i class="fas fa-paperclip"></i>
-          <span>{{ store.uploading ? '处理中...' : '上传资料' }}</span>
+          <span>{{ store.uploading ? (store.uploadProgress || '后台处理中...') : '上传资料' }}</span>
           <input type="file" :disabled="store.uploading" accept=".pdf,.docx,.xlsx,.html,.htm,.png,.jpg,.jpeg" @change="onUpload" />
         </label>
       </div>

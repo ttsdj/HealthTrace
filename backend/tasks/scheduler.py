@@ -10,22 +10,29 @@ from backend.tasks.notifications import dispatch_pending_deliveries
 _scheduler_task: asyncio.Task | None = None
 
 
+def _scheduler_tick() -> None:
+    db = SessionLocal()
+    try:
+        process_due_tasks(db)
+        execute_ready_task_runs(db)
+        db.commit()
+        if os.getenv("HEALTHTRACE_EXTERNAL_NOTIFICATIONS_ENABLED", "false").lower() == "true":
+            dispatch_pending_deliveries(db)
+            db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 async def _scheduler_loop() -> None:
     interval = max(10, int(os.getenv("HEALTHTRACE_TASK_POLL_SECONDS", "30")))
     while True:
-        db = SessionLocal()
         try:
-            process_due_tasks(db)
-            execute_ready_task_runs(db)
-            db.commit()
-            if os.getenv("HEALTHTRACE_EXTERNAL_NOTIFICATIONS_ENABLED", "false").lower() == "true":
-                dispatch_pending_deliveries(db)
-                db.commit()
+            await asyncio.to_thread(_scheduler_tick)
         except Exception as exc:
-            db.rollback()
             print(f"Health task scheduler tick skipped: {type(exc).__name__}")
-        finally:
-            db.close()
         await asyncio.sleep(interval)
 
 

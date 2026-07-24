@@ -11,7 +11,11 @@ from backend.patient.fact_candidates import (
     list_fact_candidates,
     reject_fact_candidate,
 )
-from backend.patient.scope import PatientScope, get_current_patient_scope
+from backend.patient.scope import (
+    PatientScope,
+    get_current_patient_scope,
+    get_current_patient_write_scope,
+)
 from backend.schemas.fact_candidates import (
     FactCandidateConfirmRequest,
     FactCandidateConfirmResponse,
@@ -54,7 +58,7 @@ def _candidate_response(item: PatientFactCandidate) -> FactCandidateResponse:
 async def extract_fact_candidates(
     document_id: str,
     request: FactCandidateExtractionRequest,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     try:
@@ -71,7 +75,6 @@ async def extract_fact_candidates(
                 DocumentRecord.id == document_id,
                 DocumentRecord.tenant_id == scope.tenant_id,
                 DocumentRecord.patient_id == scope.patient_id,
-                DocumentRecord.owner_user_id == scope.user_id,
             )
             .first()
         )
@@ -128,7 +131,7 @@ async def get_fact_candidates(
 async def confirm_candidate(
     candidate_id: str,
     request: FactCandidateConfirmRequest,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     try:
@@ -155,7 +158,7 @@ async def confirm_candidate(
 )
 async def reject_candidate(
     candidate_id: str,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     try:

@@ -39,5 +39,30 @@ export interface ObservabilitySummary {
     delivery_status_counts: Record<string, number>;
     delivery_channel_counts: Record<string, number>;
   };
+  background_jobs: {
+    count: number;
+    status_counts: Record<string, number>;
+    type_counts: Record<string, number>;
+    retry_count: number;
+  };
+  audit: {
+    event_count: number;
+    outcome_counts: Record<string, number>;
+  };
   privacy: { contains_prompt_text: boolean; contains_patient_identifiers: boolean };
+}
+
+export interface OperationalAlert {
+  code: string;
+  severity: 'warning' | 'critical';
+  value: number;
+  threshold: number;
+  message: string;
+}
+
+export interface OperationalAlerts {
+  status: 'ok' | 'warning' | 'critical';
+  alert_count: number;
+  alerts: OperationalAlert[];
+  window: { hours: number; start_at: string; end_at: string };
 }

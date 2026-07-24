@@ -9,6 +9,8 @@ PHASE1_VERSION = "2026_07_22_phase1_document_domains"
 PHASE2_VERSION = "2026_07_22_phase2_fact_candidates"
 PHASE3_VERSION = "2026_07_22_phase3_long_term_tasks"
 PHASE4_VERSION = "2026_07_22_phase4_notification_delivery"
+PHASE5_VERSION = "2026_07_24_phase5_access_security"
+PHASE6_VERSION = "2026_07_24_phase6_jobs_golden_review"
 
 
 def _get_migration_status(engine: Engine, version: str) -> dict:
@@ -45,6 +47,16 @@ def get_phase3_migration_status(engine: Engine) -> dict:
 def get_phase4_migration_status(engine: Engine) -> dict:
     """Read external notification delivery migration state without mutation."""
     return _get_migration_status(engine, PHASE4_VERSION)
+
+
+def get_phase5_migration_status(engine: Engine) -> dict:
+    """Read tenant access, audit, and sensitive-record migration state."""
+    return _get_migration_status(engine, PHASE5_VERSION)
+
+
+def get_phase6_migration_status(engine: Engine) -> dict:
+    """Read durable background job and golden review migration state."""
+    return _get_migration_status(engine, PHASE6_VERSION)
 
 
 def _add_column_if_missing(conn, table_name: str, column_name: str, ddl: str) -> bool:
@@ -376,3 +388,222 @@ def rollback_phase4_notification_delivery_migration(engine: Engine) -> dict:
         record.details_json = {**(record.details_json or {}), "rollback": "HEALTHTRACE_EXTERNAL_NOTIFICATIONS_ENABLED=false"}
         db.commit()
     return {"version": PHASE4_VERSION, "status": "rolled_back", "data_preserved": True}
+
+
+def apply_phase5_access_security_migration(engine: Engine) -> dict:
+    """Add multi-member access, audit, and encrypted-record tables without rewriting data."""
+    from backend.db.models import (
+        PatientAccessGrant,
+        PatientProfile,
+        SchemaMigration,
+        TenantMembership,
+        User,
+    )
+    from backend.infra.database import Base
+    from sqlalchemy.orm import Session
+
+    table_names = {
+        "tenant_memberships",
+        "patient_access_grants",
+        "patient_sensitive_records",
+        "audit_events",
+    }
+    before = {name for name in table_names if inspect(engine).has_table(name)}
+    Base.metadata.create_all(bind=engine)
+    missing = {name for name in table_names if not inspect(engine).has_table(name)}
+    if missing:
+        raise RuntimeError(f"Phase 5 tables were not created: {sorted(missing)}")
+
+    now = datetime.utcnow()
+    with Session(engine) as db:
+        for user in db.query(User).all():
+            if not user.tenant_id:
+                continue
+            patient = (
+                db.query(PatientProfile)
+                .filter(
+                    PatientProfile.user_id == user.id,
+                    PatientProfile.tenant_id == user.tenant_id,
+                )
+                .first()
+            )
+            if patient is None:
+                continue
+            membership = (
+                db.query(TenantMembership)
+                .filter(
+                    TenantMembership.tenant_id == user.tenant_id,
+                    TenantMembership.user_id == user.id,
+                )
+                .first()
+            )
+            if membership is None:
+                db.add(
+                    TenantMembership(
+                        id=f"membership-{uuid4()}",
+                        tenant_id=user.tenant_id,
+                        user_id=user.id,
+                        role="owner",
+                        status="active",
+                    )
+                )
+            grant = (
+                db.query(PatientAccessGrant)
+                .filter(
+                    PatientAccessGrant.patient_id == patient.id,
+                    PatientAccessGrant.user_id == user.id,
+                )
+                .first()
+            )
+            if grant is None:
+                db.add(
+                    PatientAccessGrant(
+                        id=f"grant-{uuid4()}",
+                        tenant_id=user.tenant_id,
+                        patient_id=patient.id,
+                        user_id=user.id,
+                        permission="manage",
+                        status="active",
+                        granted_by_user_id=user.id,
+                    )
+                )
+
+        changes = sorted(table_names - before)
+        details = {
+            "mode": "additive",
+            "changes": changes,
+            "owner_grants_backfilled": True,
+            "sensitive_payload": "AES-256-GCM application envelope",
+            "audit_payload_policy": "metadata_only_no_request_or_response_body",
+            "rollback": "disable shared access and sensitive-record endpoints",
+        }
+        record = (
+            db.query(SchemaMigration)
+            .filter(SchemaMigration.version == PHASE5_VERSION)
+            .first()
+        )
+        if record is None:
+            db.add(
+                SchemaMigration(
+                    version=PHASE5_VERSION,
+                    status="applied",
+                    details_json=details,
+                    applied_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            record.status = "applied"
+            record.details_json = details
+            record.updated_at = now
+        db.commit()
+    return {"version": PHASE5_VERSION, "status": "applied", "changes": changes}
+
+
+def rollback_phase5_access_security_migration(engine: Engine) -> dict:
+    """Disable Phase 5 behavior while preserving memberships, grants, audit, and ciphertext."""
+    status = get_phase5_migration_status(engine)
+    if status["status"] == "not_applied":
+        return {"version": PHASE5_VERSION, "status": "not_applied"}
+    from backend.db.models import SchemaMigration
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as db:
+        record = (
+            db.query(SchemaMigration)
+            .filter(SchemaMigration.version == PHASE5_VERSION)
+            .first()
+        )
+        if record is None:
+            return {"version": PHASE5_VERSION, "status": "not_applied"}
+        record.status = "rolled_back"
+        record.updated_at = datetime.utcnow()
+        record.details_json = {
+            **(record.details_json or {}),
+            "rollback": "HEALTHTRACE_SHARED_PATIENT_ACCESS_ENABLED=false",
+        }
+        db.commit()
+    return {
+        "version": PHASE5_VERSION,
+        "status": "rolled_back",
+        "data_preserved": True,
+    }
+
+
+def apply_phase6_jobs_golden_migration(engine: Engine) -> dict:
+    """Create durable jobs and review workflow tables without changing existing rows."""
+    from backend.db.models import SchemaMigration
+    from backend.infra.database import Base
+    from sqlalchemy.orm import Session
+
+    table_names = {
+        "background_jobs",
+        "golden_evaluation_cases",
+        "golden_evaluation_reviews",
+    }
+    before = {name for name in table_names if inspect(engine).has_table(name)}
+    Base.metadata.create_all(bind=engine)
+    missing = {name for name in table_names if not inspect(engine).has_table(name)}
+    if missing:
+        raise RuntimeError(f"Phase 6 tables were not created: {sorted(missing)}")
+    now = datetime.utcnow()
+    changes = sorted(table_names - before)
+    details = {
+        "mode": "additive",
+        "changes": changes,
+        "queue": "postgresql_short_claim_skip_locked",
+        "golden_gate": "independent_reviews_and_clinician_approval",
+        "rollback": "disable worker and review endpoints",
+    }
+    with Session(engine) as db:
+        record = (
+            db.query(SchemaMigration)
+            .filter(SchemaMigration.version == PHASE6_VERSION)
+            .first()
+        )
+        if record is None:
+            db.add(
+                SchemaMigration(
+                    version=PHASE6_VERSION,
+                    status="applied",
+                    details_json=details,
+                    applied_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            record.status = "applied"
+            record.details_json = details
+            record.updated_at = now
+        db.commit()
+    return {"version": PHASE6_VERSION, "status": "applied", "changes": changes}
+
+
+def rollback_phase6_jobs_golden_migration(engine: Engine) -> dict:
+    """Disable Phase 6 execution while preserving queued jobs and all review evidence."""
+    status = get_phase6_migration_status(engine)
+    if status["status"] == "not_applied":
+        return {"version": PHASE6_VERSION, "status": "not_applied"}
+    from backend.db.models import SchemaMigration
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as db:
+        record = (
+            db.query(SchemaMigration)
+            .filter(SchemaMigration.version == PHASE6_VERSION)
+            .first()
+        )
+        if record is None:
+            return {"version": PHASE6_VERSION, "status": "not_applied"}
+        record.status = "rolled_back"
+        record.updated_at = datetime.utcnow()
+        record.details_json = {
+            **(record.details_json or {}),
+            "rollback": "HEALTHTRACE_JOB_WORKER_ENABLED=false",
+        }
+        db.commit()
+    return {
+        "version": PHASE6_VERSION,
+        "status": "rolled_back",
+        "data_preserved": True,
+    }

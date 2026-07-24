@@ -34,6 +34,13 @@ class PatientDocumentUploadResponse(BaseModel):
     status: str
 
 
+class PatientDocumentUploadStartResponse(BaseModel):
+    job_id: str
+    document_id: str
+    filename: str
+    status: str
+
+
 class PatientSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     top_k: int = Field(default=5, ge=1, le=20)

@@ -1,6 +1,8 @@
 import os
+from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy.orm import Session
 
 from backend.api.resources import (
     UPLOAD_DIR,
@@ -13,9 +15,10 @@ from backend.api.resources import (
     parent_chunk_store,
     save_upload_file,
 )
-from backend.db.models import User
-from backend.infra.auth import require_admin
+from backend.db.models import BackgroundJob, User
+from backend.infra.auth import get_db, require_admin
 from backend.jobs import DELETE_STEPS, delete_job_manager, upload_job_manager
+from backend.jobs.queue import JobReporter, enqueue_job, job_snapshot
 from backend.schemas import (
     DocumentDeleteJobResponse,
     DocumentDeleteResponse,
@@ -60,13 +63,17 @@ def _split_progressive_vector_batches(leaf_docs: list[dict]) -> tuple[list[dict]
     return first_batch, remaining
 
 
-def _write_vectors_progressively(job_id: str, leaf_docs: list[dict]) -> None:
+def _write_vectors_progressively(
+    job_id: str,
+    leaf_docs: list[dict],
+    reporter=upload_job_manager,
+) -> None:
     total_leaf = len(leaf_docs)
     first_batch, remaining = _split_progressive_vector_batches(leaf_docs)
     batch_size = max(1, int(os.getenv("MILVUS_INSERT_BATCH_SIZE", "100")))
     processed_offset = 0
 
-    upload_job_manager.update_step(
+    reporter.update_step(
         job_id,
         "vector_store",
         0,
@@ -80,7 +87,7 @@ def _write_vectors_progressively(job_id: str, leaf_docs: list[dict]) -> None:
         def _on_progress(processed: int, _batch_total: int) -> None:
             overall = min(offset + processed, total_leaf)
             percent = round(overall * 100 / total_leaf) if total_leaf else 100
-            upload_job_manager.update_step(
+            reporter.update_step(
                 job_id,
                 "vector_store",
                 percent,
@@ -101,7 +108,7 @@ def _write_vectors_progressively(job_id: str, leaf_docs: list[dict]) -> None:
         processed_offset += len(first_batch)
         first_percent = round(processed_offset * 100 / total_leaf) if total_leaf else 100
         if remaining:
-            upload_job_manager.update_step(
+            reporter.update_step(
                 job_id,
                 "vector_store",
                 first_percent,
@@ -122,18 +129,25 @@ def _write_vectors_progressively(job_id: str, leaf_docs: list[dict]) -> None:
         )
 
 
-def _process_upload_job(job_id: str, file_path: str, filename: str) -> None:
+def _process_upload_job(
+    job_id: str,
+    file_path: str,
+    filename: str,
+    reporter=upload_job_manager,
+    *,
+    raise_on_error: bool = False,
+) -> dict:
     failed_step = "cleanup"
     try:
-        upload_job_manager.complete_step(job_id, "upload", "File saved on server")
+        reporter.complete_step(job_id, "upload", "File saved on server")
 
         failed_step = "cleanup"
-        upload_job_manager.update_step(job_id, "cleanup", 10, "running", "Cleaning old document version")
+        reporter.update_step(job_id, "cleanup", 10, "running", "Cleaning old document version")
         delete_document_transactionally(filename)
-        upload_job_manager.complete_step(job_id, "cleanup", "Old version cleaned")
+        reporter.complete_step(job_id, "cleanup", "Old version cleaned")
 
         failed_step = "parse"
-        upload_job_manager.update_step(
+        reporter.update_step(
             job_id,
             "parse",
             8,
@@ -148,34 +162,71 @@ def _process_upload_job(job_id: str, file_path: str, filename: str) -> None:
         leaf_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) == 3]
         if not leaf_docs:
             raise ValueError("Document processing failed: no searchable leaf chunks generated")
-        upload_job_manager.complete_step(
+        reporter.complete_step(
             job_id,
             "parse",
             f"Parse completed: {len(parent_docs)} parent chunks, {len(leaf_docs)} leaf chunks",
         )
 
         failed_step = "parent_store"
-        upload_job_manager.update_step(job_id, "parent_store", 20, "running", "Writing parent chunks")
+        reporter.update_step(job_id, "parent_store", 20, "running", "Writing parent chunks")
         parent_chunk_store.upsert_documents(parent_docs)
-        upload_job_manager.complete_step(job_id, "parent_store", f"Parent chunks stored: {len(parent_docs)}")
+        reporter.complete_step(job_id, "parent_store", f"Parent chunks stored: {len(parent_docs)}")
 
         failed_step = "vector_store"
         total_leaf = len(leaf_docs)
-        _write_vectors_progressively(job_id, leaf_docs)
-        upload_job_manager.complete_step(job_id, "vector_store", f"Vector indexing completed: {total_leaf} leaf chunks")
-        upload_job_manager.complete_job(job_id, f"Uploaded and indexed {filename}")
+        _write_vectors_progressively(job_id, leaf_docs, reporter)
+        reporter.complete_step(job_id, "vector_store", f"Vector indexing completed: {total_leaf} leaf chunks")
+        reporter.complete_job(job_id, f"Uploaded and indexed {filename}")
+        return {
+            "filename": filename,
+            "parent_chunks": len(parent_docs),
+            "leaf_chunks": total_leaf,
+        }
     except Exception as e:
-        upload_job_manager.fail_job(job_id, failed_step, str(e))
+        reporter.fail_job(job_id, failed_step, str(e))
+        if raise_on_error:
+            raise
+        return {"filename": filename, "error": str(e)}
 
 
-def _process_delete_job(job_id: str, filename: str) -> None:
+def _process_delete_job(
+    job_id: str,
+    filename: str,
+    reporter=delete_job_manager,
+    *,
+    raise_on_error: bool = False,
+) -> dict:
     try:
-        chunks_deleted = delete_document_transactionally(filename, delete_job_manager, job_id)
-        delete_job_manager.complete_job(job_id, f"Deleted {filename}, vector rows: {chunks_deleted}")
+        chunks_deleted = delete_document_transactionally(filename, reporter, job_id)
+        reporter.complete_job(job_id, f"Deleted {filename}, vector rows: {chunks_deleted}")
+        return {"filename": filename, "chunks_deleted": chunks_deleted}
     except Exception as e:
-        job = delete_job_manager.get_job(job_id)
+        job = reporter.get_job(job_id)
         current_step = job.get("current_step", "prepare") if job else "prepare"
-        delete_job_manager.fail_job(job_id, current_step, str(e))
+        reporter.fail_job(job_id, current_step, str(e))
+        if raise_on_error:
+            raise
+        return {"filename": filename, "error": str(e)}
+
+
+def process_queued_upload(job_id: str, payload: dict) -> dict:
+    return _process_upload_job(
+        job_id,
+        str(payload["file_path"]),
+        str(payload["filename"]),
+        JobReporter(job_id),
+        raise_on_error=True,
+    )
+
+
+def process_queued_delete(job_id: str, payload: dict) -> dict:
+    return _process_delete_job(
+        job_id,
+        str(payload["filename"]),
+        JobReporter(job_id),
+        raise_on_error=True,
+    )
 
 
 @router.get("/documents", response_model=DocumentListResponse)
@@ -207,9 +258,9 @@ async def list_documents(_: User = Depends(require_admin)):
 
 @router.post("/documents/upload/async", response_model=DocumentUploadStartResponse)
 async def upload_document_async(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
 ):
     filename = file.filename or ""
     if not filename:
@@ -232,25 +283,51 @@ async def upload_document_async(
         upload_job_manager.fail_job(job["job_id"], "upload", f"File save failed: {e}")
         raise HTTPException(status_code=500, detail=f"File save failed: {e}")
 
-    background_tasks.add_task(_process_upload_job, job["job_id"], str(file_path), filename)
-    return DocumentUploadStartResponse(
+    durable_job, _ = enqueue_job(
+        db,
         job_id=job["job_id"],
+        job_type="document_upload",
+        queue_name="default",
+        payload={"file_path": str(file_path), "filename": filename},
+        progress=job,
+        idempotency_key=f"upload:{filename}:{uuid4().hex}",
+        created_by_user_id=current_user.id,
+        max_attempts=3,
+    )
+    db.commit()
+    return DocumentUploadStartResponse(
+        job_id=durable_job.id,
         filename=filename,
         message="File uploaded. Background parsing, chunking, and vector indexing started.",
     )
 
 
 @router.get("/documents/upload/jobs/{job_id}", response_model=DocumentUploadJobResponse)
-async def get_upload_job(job_id: str, _: User = Depends(require_admin)):
-    job = upload_job_manager.get_job(job_id)
+async def get_upload_job(
+    job_id: str,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    row = db.query(BackgroundJob).filter(BackgroundJob.id == job_id).first()
+    job = job_snapshot(row) if row else upload_job_manager.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Upload job not found or expired")
     return DocumentUploadJobResponse(**job)
 
 
 @router.get("/documents/upload/jobs", response_model=list[DocumentUploadJobResponse])
-async def list_upload_jobs(_: User = Depends(require_admin)):
-    jobs = upload_job_manager.list_jobs()
+async def list_upload_jobs(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(BackgroundJob)
+        .filter(BackgroundJob.job_type == "document_upload")
+        .order_by(BackgroundJob.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    jobs = [job_snapshot(item) for item in rows]
     jobs.sort(key=lambda item: item.get("created_at", ""), reverse=True)
     return [DocumentUploadJobResponse(**job) for job in jobs]
 
@@ -258,8 +335,8 @@ async def list_upload_jobs(_: User = Depends(require_admin)):
 @router.delete("/documents/delete/async/{filename}", response_model=DocumentDeleteStartResponse)
 async def delete_document_async(
     filename: str,
-    background_tasks: BackgroundTasks,
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
 ):
     job = delete_job_manager.create_job(
         filename,
@@ -269,17 +346,33 @@ async def delete_document_async(
         completion_step="parent_store",
     )
     delete_job_manager.update_step(job["job_id"], "prepare", 1, "running", "Delete job submitted")
-    background_tasks.add_task(_process_delete_job, job["job_id"], filename)
-    return DocumentDeleteStartResponse(
+    durable_job, _ = enqueue_job(
+        db,
         job_id=job["job_id"],
+        job_type="document_delete",
+        queue_name="default",
+        payload={"filename": filename},
+        progress=job,
+        idempotency_key=f"delete:{filename}:{uuid4().hex}",
+        created_by_user_id=current_user.id,
+        max_attempts=3,
+    )
+    db.commit()
+    return DocumentDeleteStartResponse(
+        job_id=durable_job.id,
         filename=filename,
         message=f"Deleting {filename}",
     )
 
 
 @router.get("/documents/delete/jobs/{job_id}", response_model=DocumentDeleteJobResponse)
-async def get_delete_job(job_id: str, _: User = Depends(require_admin)):
-    job = delete_job_manager.get_job(job_id)
+async def get_delete_job(
+    job_id: str,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    row = db.query(BackgroundJob).filter(BackgroundJob.id == job_id).first()
+    job = job_snapshot(row) if row else delete_job_manager.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Delete job not found or expired")
     return DocumentDeleteJobResponse(**job)

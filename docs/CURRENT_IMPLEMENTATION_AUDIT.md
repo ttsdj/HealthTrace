@@ -1,6 +1,6 @@
 # HealthTrace 当前实现审计
 
-审计基线：Git tag `medretrieve-v3-baseline`，源提交 `15cab76`。最近更新：2026-07-22。
+审计基线：Git tag `medretrieve-v3-baseline`，源提交 `15cab76`。最近更新：2026-07-24。
 
 状态定义：
 
@@ -14,7 +14,9 @@
 | 能力 | 状态 | 代码证据 | 限制 |
 |---|---|---|---|
 | FastAPI + Vue 工作台 | IMPLEMENTED | `backend/app.py`、`frontend/src/App.vue`、`HealthRecordWorkspace.vue` | 桌面与移动端核心布局已验证；不是原生 App |
-| JWT 与会话隔离 | IMPLEMENTED | `backend/infra/auth.py`、`backend/patient/scope.py`、sessions 路由 | 每名现有用户迁移到独立 tenant/patient；尚未实现机构多成员租户 |
+| JWT、tenant 与患者授权 | IMPLEMENTED | `backend/infra/auth.py`、`backend/patient/scope.py`、`access_control.py` | 支持多成员 tenant 与患者级 read/write/manage 授权；真实机构身份源和 SSO 尚未接入 |
+| 私密扩展字段加密 | IMPLEMENTED | `backend/security/crypto.py`、`patient_sensitive_records` | AES-256-GCM 信封加密已验证；生产 KMS、密钥轮换和透明数据库加密仍属于部署责任 |
+| Metadata-only 审计 | IMPLEMENTED | `backend/security/middleware.py`、`audit_events` | 记录路由、身份、scope、状态和延迟，不记录正文；集中日志留存策略尚需部署配置 |
 | 公共/患者文档分域 | IMPLEMENTED | `patient_documents.py`、`migrate_phase1_domains.py`、`smoke_patient_rag.py` | 已用本地 BGE-M3 验证上传、Hybrid 召回、聊天注入、跨患者隔离和删除；真实患者 PDF/OCR 质量仍需评测 |
 | FHIR-like 患者事实 | IMPLEMENTED | `patient_facts`、`backend/patient/facts.py` | 当前是轻量 canonical schema，不是完整 FHIR Server |
 | 文档候选事实审核 | IMPLEMENTED | `patient_fact_candidates`、`backend/patient/fact_candidates.py`、`HealthRecordWorkspace.vue` | 本地规则默认运行；外部 LLM 增强必须显式同意，仍需临床抽取 golden set |
@@ -41,18 +43,21 @@
 | PaddleOCR / PP-Structure | PARTIAL | `backend/indexing/ocr.py` | 可选重依赖；测试主要验证路由与容错，不是临床字段准确率 |
 | VLM fallback | NOT_FOUND | 无 VLM 调用实现 | 仅在目标架构中规划 |
 | 多模态向量 | NOT_FOUND | 无视觉 collection 或跨模态 embedding | 4GB GPU 环境下延期 POC |
-| PostgreSQL 数据模型 | IMPLEMENTED | 会话、文档、患者事实、时间轴、目标、任务运行和通知模型 | 任务领取使用 PostgreSQL `SKIP LOCKED`；字段加密与完整 FHIR 映射尚未实现 |
+| PostgreSQL 数据模型 | IMPLEMENTED | 会话、文档、患者事实、时间轴、目标、任务、授权、审计与 golden review 模型 | 持久任务使用 `SKIP LOCKED`；当前是 FHIR-like schema，不是完整 FHIR Server |
+| 通用持久后台任务 | IMPLEMENTED | `backend/jobs/queue.py`、`worker.py`、`background_jobs` | 文档、患者索引和正式评测具备幂等、并发、退避和 stale recovery；未使用独立分布式队列集群 |
 | Redis 缓存 | PARTIAL | `backend/infra/cache.py`、父块缓存 | 无完整任务状态、查询缓存治理和缓存一致性审计 |
 | Neo4j 医疗 KG | PARTIAL | `backend/kg/client.py`、`search_medical_kg` | 查询工具已接入；实际图数据完整性取决于外部实例 |
 | 医疗安全规则 | PARTIAL | `backend/medical_nlp/safety.py`、`backend/agent/orchestrator.py` | 高风险、缺失信息、无证据和冲突已进入 Action Policy；规则覆盖仍不是临床决策系统 |
-| PII 脱敏 | PARTIAL | 手机号、身份证、邮箱等规则 | 尚无 PII NER、全日志二次扫描和字段级加密 |
+| PII 脱敏 | PARTIAL | 手机号、身份证、邮箱规则与私密字段 AES-GCM 加密 | 尚无医学 PII NER、全日志二次扫描和集中式 KMS |
 | 冲突提示 | IMPLEMENTED | `backend/rag/conflict.py`、`backend/agent/orchestrator.py` | KG/向量冲突进入统一 `CONFLICTING` Evidence State 并强制披露；医学冲突检测仍以规则为主 |
 | 医院导航 | PARTIAL | `backend/care_navigation/` | 依赖定位授权和外部地图/搜索服务 |
 | RAGCare 评测框架 | IMPLEMENTED | dataset、retrieval、metrics、judge、runner、测试 | 目标仓库不包含原始 420 条和正式结果 |
 | 正式 RAGAS 代码 | IMPLEMENTED | `backend/evaluation/ragas_*`、评测脚本 | 当前目标仓库未发现可复现正式结果 |
 | 运行时 RAGAS-lite | PARTIAL | `backend/chat/service.py`、`backend/observability/service.py` | 已进入管理员聚合监控；仅启发式信号，不是 RAGAS 模型评审 |
-| 全局可观测性 | IMPLEMENTED | `/observability/summary`、`ObservabilityWorkspace.vue` | 只输出聚合计数，不返回问题、回答或患者标识；尚未接 Prometheus/OpenTelemetry |
-| Health Agent 策略评测 | IMPLEMENTED | `evaluation/healthtrace_agent_v1.jsonl`、`scripts/evaluate_healthtrace_agent.py` | 42 条人工规则用例当前 42/42；不是临床医学答案评测 |
+| 全局可观测性 | IMPLEMENTED | `/observability/summary`、`/alerts`、`/metrics`、`metrics.py`、`telemetry.py` | Prometheus 指标已提供，OTLP 按配置启用；当前没有随仓库部署 Grafana/Collector |
+| Golden 审核门禁 | IMPLEMENTED | `golden_review.py`、`golden_evaluation.py`、`golden_evaluation_*` 表 | 双人独立审核与 clinician 门禁已实现；当前 42 条均为 draft，尚未获得临床批准 |
+| Health Agent 策略评测 | IMPLEMENTED | `evaluation/healthtrace_agent_v1.jsonl`、`scripts/evaluate_healthtrace_agent.py` | 42 条确定性工程用例当前 42/42；不是临床医学答案评测 |
+| Liveness/readiness 与容器发布 | IMPLEMENTED | `/health/live`、`/health/ready`、`Dockerfile`、`container.yml` | 配置和自动化已完成；仍需在目标云平台完成真实发布与恢复演练 |
 | MIRAGE 评测 | IMPLEMENTED | dataset、metrics、runner、CLI 与历史结果摘要 | 原始 7,663 条逐题结果不提交 Git |
 
 ## 当前真实上下文注入
@@ -75,12 +80,12 @@ System Prompt
 
 ## 当前数据结构
 
-PostgreSQL 已增加 tenant、patient、document、fact candidate、FHIR-like fact、timeline、health task/run 等表；父块增加 document domain 与患者 scope。Milvus 新增独立 `patient_record` collection，患者检索必须带 tenant/patient 过滤。旧公共 collection 不做破坏性改造。候选事实不会直接成为权威事实，必须经患者确认。
+PostgreSQL 已增加 tenant、patient、document、fact candidate、FHIR-like fact、timeline、health task/run、成员授权、审计、持久任务与 golden review 表；父块增加 document domain 与患者 scope。Milvus 新增独立 `patient_record` collection，患者检索必须带 tenant/patient 过滤。旧公共 collection 不做破坏性改造。候选事实不会直接成为权威事实，必须经患者确认。
 
 ## 测试覆盖判断
 
-迁移前基线为 35 项，Phase 0 为 39 项；当前为 90 项通过。新增覆盖四阶段加法迁移、跨患者数据/API 隔离、八阶段咨询状态机、Agent 策略评测、Observation 趋势、Patient Tool fallback、聚合可观测性、任务幂等、外部通知同意与独立重试。2026-07-22 已在真实旧 PostgreSQL/Milvus 上完成四阶段迁移、备份校验、独立患者 collection、本地 BGE-M3 患者文档和候选事实冒烟验收。
+迁移前基线为 35 项，Phase 0 为 39 项；当前为 98 项通过。新增覆盖六阶段加法迁移、跨患者数据/API 隔离、成员授权与加密、持久任务故障恢复、Golden 审核门禁、八阶段咨询状态机、Agent 策略评测、Observation 趋势、Patient Tool fallback、Prometheus 聚合监控、任务幂等、外部通知同意与独立重试。2026-07-24 已在真实旧 PostgreSQL 上完成 Phase 5/6 迁移，迁移前备份和恢复目录校验通过。
 
 ## 下一步
 
-下一步优先建设患者文档检索 golden set、临床审核安全攻击集、真实通知供应商验收、OpenTelemetry 指标出口和多成员 tenant 权限；在完成临床数据验证前仍不得描述为临床诊疗系统。
+下一步不再以增加接口数量为目标，而是完成外部验收：临床人员审核患者文档/安全/趋势 golden set，邮件与 Webhook 供应商沙箱验证，生产 KMS 与备份恢复演练，以及目标平台的 Prometheus/OTLP 看板和发布回滚演练。在完成临床数据验证前仍不得描述为临床诊疗系统。

@@ -90,8 +90,14 @@ def init_db() -> None:
             apply_phase1_migration,
             apply_phase2_fact_candidate_migration,
             apply_phase3_long_term_task_migration,
+            apply_phase4_notification_delivery_migration,
+            apply_phase5_access_security_migration,
+            apply_phase6_jobs_golden_migration,
         )
 
         apply_phase1_migration(engine)
         apply_phase2_fact_candidate_migration(engine)
         apply_phase3_long_term_task_migration(engine)
+        apply_phase4_notification_delivery_migration(engine)
+        apply_phase5_access_security_migration(engine)
+        apply_phase6_jobs_golden_migration(engine)

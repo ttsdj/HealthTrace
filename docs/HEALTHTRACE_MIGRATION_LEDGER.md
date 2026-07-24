@@ -102,3 +102,19 @@ HEALTHTRACE_INFRA_MODE=external
 - 外部通知：站内通知先提交，邮件/Webhook 后投递；显式同意、幂等、指数退避，外部失败不会回滚任务。
 - 验证：后端 90 项测试通过，前端 TypeScript/Vite 构建通过，桌面和 390×844 移动视口通过，真实 `/health` 为 `ready=true`；Neo4j 保持可选降级。
 - 容器化：Compose 合并配置通过；应用镜像构建被本机 Docker 腾讯镜像源 EOF 阻塞，未发现 Dockerfile 语法错误，需修复 Docker Desktop registry mirror 后重试。
+
+## 2026-07-24 权限、安全、持久任务与正式评测门禁
+
+- 迁移版本：`2026_07_24_phase5_access_security`、`2026_07_24_phase6_jobs_golden_review`。
+- 迁移前备份：`data/backups/healthtrace-pre-phase5-phase6-20260724.dump`，custom format，已通过 `pg_restore -l` 校验；SHA-256 为 `4E9F6ADE811B34A2E74FB319DE2F688821100F82A83D534C7E7E22782FEFE9AF`。
+- Phase 5 新增：tenant 成员、患者授权、AES-256-GCM 私密记录和 metadata-only 审计表。
+- Phase 6 新增：PostgreSQL 持久后台任务、Golden case 和独立审核表。由于 Phase 5 启动时的 metadata 初始化已经创建当前模型表，Phase 6 在真实库登记为 applied 且 `changes=[]`；没有删除或改写已有业务数据。
+- 真实库迁移后计数：用户 10、tenant membership 10、patient grant 10、audit 0、background job 0、golden case 0。
+- 评测导入：随后导入 42 条 `healthtrace_agent/v1` 用例，全部为 draft、approved=0、clinical claim allowed=false；没有伪造临床审核。
+- 持久任务：公共文档上传/删除、患者文档索引和正式 Agent 评测进入数据库队列，支持并发领取、幂等键、短事务进度、stale recovery 和有限指数退避。
+- 可观测性：增加 Prometheus 文本指标、可选 OTLP、聚合告警、liveness/readiness 和通知诊断。
+- 部署：增加新机器 `setup.bat`、生产 preflight、部署 smoke、非 root 多阶段镜像以及 tag 触发的 GHCR 发布工作流。
+- 容器：默认 PyTorch CPU wheel，避免通用 API 镜像携带 CUDA 运行库；本地镜像由约 3.13 GB 降至约 586 MB（约 81%）。
+- 容器冒烟：临时应用容器在 external 模式连接既有 PostgreSQL、Redis 与 Milvus，`/health/live`、`/health/ready`、前端静态资源和 deployment smoke 全部通过；容器状态为 healthy。Neo4j 未启动并按 optional service 正常降级。
+- 网络说明：本机 Docker Desktop 的腾讯镜像源在 Docker Hub 元数据请求时返回 EOF；本地验收通过 Dockerfile 构建参数使用 AWS 公共仓库中的等价官方 Python/Node 镜像完成，默认配置未写死本机绕行地址。
+- 验证：后端 98 项测试通过，Python compileall、前端生产构建、仓库安全检查、生产 preflight、Compose 配置和真实容器冒烟通过。

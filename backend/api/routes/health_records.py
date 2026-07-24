@@ -8,7 +8,11 @@ from backend.patient.facts import (
     list_patient_facts,
     retract_patient_fact,
 )
-from backend.patient.scope import PatientScope, get_current_patient_scope
+from backend.patient.scope import (
+    PatientScope,
+    get_current_patient_scope,
+    get_current_patient_write_scope,
+)
 from backend.patient.trends import calculate_observation_trend
 from backend.schemas.health_records import (
     FactRetractionResponse,
@@ -44,7 +48,7 @@ def _fact_response(item) -> PatientFactResponse:
 @router.post("/facts", response_model=PatientFactResponse)
 async def create_fact(
     request: PatientFactCreate,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     try:
@@ -89,7 +93,7 @@ async def list_facts(
 @router.delete("/facts/{fact_id}", response_model=FactRetractionResponse)
 async def retract_fact(
     fact_id: str,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     if not retract_patient_fact(db, scope, fact_id):

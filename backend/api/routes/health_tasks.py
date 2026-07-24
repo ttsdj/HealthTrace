@@ -3,7 +3,11 @@ from sqlalchemy.orm import Session
 
 from backend.db.models import HealthNotificationDelivery
 from backend.infra.auth import get_db
-from backend.patient.scope import PatientScope, get_current_patient_scope
+from backend.patient.scope import (
+    PatientScope,
+    get_current_patient_scope,
+    get_current_patient_write_scope,
+)
 from backend.schemas.tasks import (
     HealthGoalCreate,
     HealthGoalListResponse,
@@ -107,7 +111,7 @@ def _notification_response(item, db: Session) -> HealthNotificationResponse:
 @router.post("/tasks", response_model=HealthTaskResponse)
 async def create_task(
     request: HealthTaskCreate,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     try:
@@ -131,7 +135,7 @@ async def create_task(
 @router.post("/tasks/{task_id}/confirm", response_model=HealthTaskResponse)
 async def confirm_task(
     task_id: str,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     task = HealthTaskService(db, scope).confirm(task_id)
@@ -144,7 +148,7 @@ async def confirm_task(
 @router.post("/tasks/{task_id}/cancel", response_model=HealthTaskResponse)
 async def cancel_task(
     task_id: str,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     task = HealthTaskService(db, scope).cancel(task_id)
@@ -178,7 +182,7 @@ async def list_task_runs(
 async def submit_task_run_input(
     run_id: str,
     request: HealthTaskRunInput,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     run = HealthTaskService(db, scope).submit_run_input(run_id, request.values)
@@ -191,7 +195,7 @@ async def submit_task_run_input(
 @router.post("/tasks/runs/{run_id}/retry", response_model=HealthTaskRunResponse)
 async def retry_task_run(
     run_id: str,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     run = HealthTaskService(db, scope).retry_run(run_id)
@@ -204,7 +208,7 @@ async def retry_task_run(
 @router.post("/goals", response_model=HealthGoalResponse)
 async def create_goal(
     request: HealthGoalCreate,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     goal, created = HealthGoalService(db, scope).create(
@@ -233,7 +237,7 @@ async def list_goals(
 async def update_goal_progress(
     goal_id: str,
     request: HealthGoalProgressUpdate,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     goal = HealthGoalService(db, scope).update_progress(goal_id, request.progress)
@@ -246,7 +250,7 @@ async def update_goal_progress(
 @router.post("/goals/{goal_id}/archive", response_model=HealthGoalResponse)
 async def archive_goal(
     goal_id: str,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     goal = HealthGoalService(db, scope).archive(goal_id)
@@ -271,7 +275,7 @@ async def list_notifications(
 @router.post("/notifications/{notification_id}/read", response_model=HealthNotificationResponse)
 async def mark_notification_read(
     notification_id: str,
-    scope: PatientScope = Depends(get_current_patient_scope),
+    scope: PatientScope = Depends(get_current_patient_write_scope),
     db: Session = Depends(get_db),
 ):
     notification = HealthTaskService(db, scope).mark_notification_read(notification_id)

@@ -26,6 +26,7 @@ export const useHealthRecordStore = defineStore('healthRecords', {
     notifications: [] as HealthNotification[],
     loading: false,
     uploading: false,
+    uploadProgress: '',
     activeOperations: {} as Record<string, boolean>,
     lastError: '',
   }),
@@ -69,21 +70,39 @@ export const useHealthRecordStore = defineStore('healthRecords', {
 
     async uploadDocument(file: File) {
       this.uploading = true;
+      this.uploadProgress = '正在上传文件';
       this.lastError = '';
       try {
         const form = new FormData();
         form.append('file', file);
-        const response = await api.post('/patient/documents/upload', form, {
+        const response = await api.post('/patient/documents/upload/async', form, {
           headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 600000,
+          timeout: 120000,
         });
-        await this.extractCandidates(response.data.document_id, false, false);
-        return response.data;
+        const { job_id: jobId, document_id: documentId } = response.data;
+        for (let attempt = 0; attempt < 1200; attempt += 1) {
+          const jobResponse = await api.get(`/patient/jobs/${encodeURIComponent(jobId)}`);
+          const job = jobResponse.data;
+          const percent = job.progress?.steps?.length
+            ? Math.max(...job.progress.steps.map((item: any) => Number(item.percent || 0)))
+            : 0;
+          this.uploadProgress = `后台处理中 ${percent}%`;
+          if (job.status === 'completed') {
+            await this.extractCandidates(documentId, false, false);
+            return { ...response.data, ...job.result };
+          }
+          if (['failed', 'cancelled'].includes(job.status)) {
+            throw new Error(job.error_message || job.progress?.error || '后台文档处理失败');
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        }
+        throw new Error('文档仍在后台处理，请稍后在患者资料中查看状态');
       } catch (error: any) {
         this.lastError = messageFromError(error, '患者文档上传失败');
         throw new Error(this.lastError);
       } finally {
         this.uploading = false;
+        this.uploadProgress = '';
       }
     },
 

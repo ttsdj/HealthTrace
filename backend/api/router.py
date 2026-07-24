@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from backend.api.routes import (
+    access_control,
     auth,
     care_navigation,
     chat,
@@ -8,15 +9,19 @@ from backend.api.routes import (
     documents,
     evaluation,
     fact_candidates,
+    golden_evaluation,
     health,
     health_records,
     health_tasks,
+    jobs,
+    notification_admin,
     observability,
     patient_documents,
     sessions,
 )
 
 router = APIRouter()
+router.include_router(access_control.router)
 router.include_router(auth.router)
 router.include_router(sessions.router)
 router.include_router(chat.router)
@@ -25,8 +30,11 @@ router.include_router(documents.router)
 router.include_router(collections.router)
 router.include_router(evaluation.router)
 router.include_router(fact_candidates.router)
+router.include_router(golden_evaluation.router)
 router.include_router(health.router)
 router.include_router(health_records.router)
 router.include_router(health_tasks.router)
+router.include_router(jobs.router)
+router.include_router(notification_admin.router)
 router.include_router(observability.router)
 router.include_router(patient_documents.router)

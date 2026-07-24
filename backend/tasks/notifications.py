@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import smtplib
+import hashlib
+import hmac
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from urllib.parse import urlparse
@@ -71,16 +73,28 @@ def _send_webhook(delivery, notification, task) -> None:
     allow_insecure = os.getenv("HEALTHTRACE_ALLOW_INSECURE_WEBHOOK", "false").lower() == "true"
     if not url or parsed.scheme not in ({"https"} if not (local and allow_insecure) else {"http", "https"}):
         raise ValueError("secure server-configured webhook URL is unavailable")
+    payload = {
+        "event": "healthtrace.notification",
+        "notification_id": notification.id,
+        "notification_type": notification.notification_type,
+        "title": notification.title,
+        "body": notification.body,
+        "created_at": notification.created_at.isoformat(),
+    }
+    headers = {"Content-Type": "application/json"}
+    secret = os.getenv("HEALTHTRACE_NOTIFICATION_WEBHOOK_SECRET", "").strip()
+    if secret:
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        signature = hmac.new(
+            secret.encode("utf-8"),
+            canonical.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        headers["X-HealthTrace-Signature"] = f"sha256={signature}"
     response = requests.post(
         url,
-        json={
-            "event": "healthtrace.notification",
-            "notification_id": notification.id,
-            "notification_type": notification.notification_type,
-            "title": notification.title,
-            "body": notification.body,
-            "created_at": notification.created_at.isoformat(),
-        },
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
         timeout=float(os.getenv("HEALTHTRACE_NOTIFICATION_TIMEOUT_SECONDS", "5")),
     )
     response.raise_for_status()
@@ -161,3 +175,64 @@ def dispatch_pending_deliveries(
         handled.append(delivery)
     db.flush()
     return handled
+
+
+def notification_configuration_status() -> dict:
+    webhook_url = os.getenv("HEALTHTRACE_NOTIFICATION_WEBHOOK_URL", "").strip()
+    parsed = urlparse(webhook_url)
+    webhook_secure = parsed.scheme == "https" and bool(parsed.hostname)
+    smtp_host = os.getenv("HEALTHTRACE_SMTP_HOST", "").strip()
+    smtp_sender = os.getenv("HEALTHTRACE_SMTP_FROM", "").strip()
+    return {
+        "external_dispatch_enabled": os.getenv(
+            "HEALTHTRACE_EXTERNAL_NOTIFICATIONS_ENABLED", "false"
+        ).lower()
+        == "true",
+        "webhook": {
+            "configured": bool(webhook_url),
+            "secure": webhook_secure,
+            "signed": bool(
+                os.getenv("HEALTHTRACE_NOTIFICATION_WEBHOOK_SECRET", "").strip()
+            ),
+            "host": parsed.hostname or "",
+        },
+        "email": {
+            "configured": bool(smtp_host and smtp_sender),
+            "host": smtp_host,
+            "port": int(os.getenv("HEALTHTRACE_SMTP_PORT", "587")),
+            "sender_hint": _masked_email(smtp_sender),
+            "starttls": os.getenv("HEALTHTRACE_SMTP_STARTTLS", "true").lower()
+            == "true",
+            "ssl": os.getenv("HEALTHTRACE_SMTP_SSL", "false").lower() == "true",
+        },
+    }
+
+
+def send_notification_probe(
+    *,
+    channel: str,
+    recipient: str = "",
+    senders: dict | None = None,
+) -> dict:
+    from types import SimpleNamespace
+
+    handlers = {"webhook": _send_webhook, "email": _send_email, **(senders or {})}
+    if channel not in handlers:
+        raise ValueError("Notification probe channel must be webhook or email")
+    now = datetime.utcnow()
+    notification = SimpleNamespace(
+        id=f"probe-{uuid4()}",
+        notification_type="configuration_probe",
+        title="HealthTrace notification configuration test",
+        body="This is an explicitly confirmed HealthTrace delivery probe.",
+        created_at=now,
+    )
+    task = SimpleNamespace(payload_json={"notification_email": recipient})
+    delivery = SimpleNamespace(channel=channel)
+    handlers[channel](delivery, notification, task)
+    return {
+        "channel": channel,
+        "status": "delivered",
+        "delivered_at": now.isoformat(),
+        "recipient_hint": _masked_email(recipient) if channel == "email" else "server-configured webhook",
+    }
