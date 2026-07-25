@@ -192,6 +192,30 @@ class DocumentVersion(Base):
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    retention_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+
+class DocumentVersionParentChunk(Base):
+    __tablename__ = "document_version_parent_chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "version_id",
+            "chunk_id",
+            name="uq_document_version_parent_chunk",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version_id: Mapped[str] = mapped_column(
+        ForeignKey("document_versions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("document_records.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    chunk_id: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class PatientFactCandidate(Base):

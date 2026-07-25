@@ -27,6 +27,7 @@ from backend.schemas import (
     DocumentDeleteStartResponse,
     DocumentInfo,
     DocumentListResponse,
+    DocumentRollbackResponse,
     DocumentVersionInfo,
     DocumentVersionListResponse,
     DocumentUploadJobResponse,
@@ -392,10 +393,55 @@ async def list_document_versions(
                 activated_at=(
                     item.activated_at.isoformat() + "Z" if item.activated_at else None
                 ),
+                retention_until=(
+                    item.retention_until.isoformat() + "Z"
+                    if item.retention_until
+                    else None
+                ),
+                archived_vectors=int(
+                    (item.metadata_json or {}).get("archived_vectors", 0)
+                ),
                 error=item.error_message,
             )
             for item in versions
         ],
+    )
+
+
+@router.post(
+    "/documents/{filename}/versions/{version}/rollback",
+    response_model=DocumentRollbackResponse,
+)
+async def rollback_document_version(
+    filename: str,
+    version: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    safe_name = _safe_public_filename(filename)
+    document_id = public_document_id(safe_name)
+    record = db.query(DocumentRecord).filter(DocumentRecord.id == document_id).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        result = incremental_indexer.rollback(
+            document_id=document_id,
+            target_version_number=version,
+            created_by_user_id=current_user.id,
+        )
+    except (LookupError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Document rollback failed; active version retained: {exc}",
+        ) from exc
+    return DocumentRollbackResponse(
+        filename=record.filename,
+        message=f"Document restored from version {result.previous_version} to {result.version}",
+        **result.to_dict(),
     )
 
 

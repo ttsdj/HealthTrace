@@ -16,6 +16,8 @@ COLLECTION_ENV_BY_KIND = {
     "patient_record": "MILVUS_PATIENT_RECORD_COLLECTION",
     "episodic_memory": "MILVUS_EPISODIC_MEMORY_COLLECTION",
     "semantic_memory": "MILVUS_SEMANTIC_MEMORY_COLLECTION",
+    "medical_qa_archive": "MILVUS_MEDICAL_QA_ARCHIVE_COLLECTION",
+    "patient_record_archive": "MILVUS_PATIENT_RECORD_ARCHIVE_COLLECTION",
 }
 
 COLLECTION_DEFAULT_BY_KIND = {
@@ -23,6 +25,8 @@ COLLECTION_DEFAULT_BY_KIND = {
     "patient_record": "healthtrace_patient_record_text_v1",
     "episodic_memory": "healthtrace_episodic_memory_v1",
     "semantic_memory": "healthtrace_semantic_memory_v1",
+    "medical_qa_archive": "healthtrace_medical_text_archive_v1",
+    "patient_record_archive": "healthtrace_patient_record_text_archive_v1",
 }
 
 
@@ -62,6 +66,43 @@ def milvus_client_session(settings: MilvusSettings | None = None) -> Iterator[Mi
 
 def _normalize_filter(filter_expr: str) -> str:
     return filter_expr.strip() if filter_expr.strip() else "id >= 0"
+
+
+def _read_consistency_level() -> str:
+    return os.getenv("MILVUS_READ_CONSISTENCY_LEVEL", "Strong").strip() or "Strong"
+
+
+def _deduplicate_versioned_results(results: list[dict], top_k: int) -> list[dict]:
+    """Prefer the newest version when an update overlap returns duplicate content."""
+    best: dict[tuple[str, str], dict] = {}
+    order: list[tuple[str, str]] = []
+    for result in results:
+        document_key = str(result.get("document_id") or result.get("filename") or "")
+        content_key = str(
+            result.get("content_fingerprint")
+            or result.get("chunk_id")
+            or result.get("id")
+        )
+        key = (document_key, content_key)
+        current = best.get(key)
+        if current is None:
+            best[key] = result
+            order.append(key)
+            continue
+        current_version = int(current.get("document_version", 0) or 0)
+        candidate_version = int(result.get("document_version", 0) or 0)
+        if candidate_version > current_version:
+            best[key] = result
+    return [best[key] for key in order][:top_k]
+
+
+VERSION_OUTPUT_FIELDS = [
+    "content_fingerprint",
+    "placement_fingerprint",
+    "embedding_normalization_version",
+    "document_version",
+    "content_sha256",
+]
 
 
 class MilvusStore:
@@ -190,6 +231,7 @@ class MilvusStore:
                 output_fields=fields,
                 limit=min(limit, QUERY_MAX_LIMIT),
                 offset=offset,
+                consistency_level=_read_consistency_level(),
             )
 
         return self._run(_query)
@@ -209,6 +251,7 @@ class MilvusStore:
                     output_fields=fields,
                     limit=QUERY_MAX_LIMIT,
                     offset=offset,
+                    consistency_level=_read_consistency_level(),
                 )
                 if not batch:
                     break
@@ -269,6 +312,7 @@ class MilvusStore:
             "tenant_id",
             "patient_id",
             "owner_user_id",
+            *VERSION_OUTPUT_FIELDS,
         ]
         dense_search = AnnSearchRequest(
             data=[dense_embedding],
@@ -291,8 +335,9 @@ class MilvusStore:
                 collection_name=self.collection_name,
                 reqs=[dense_search, sparse_search],
                 ranker=reranker,
-                limit=top_k,
+                limit=top_k * 3,
                 output_fields=output_fields,
+                consistency_level=_read_consistency_level(),
             )
 
         results = self._run(_search)
@@ -315,6 +360,13 @@ class MilvusStore:
                     "tenant_id": hit.get("tenant_id", ""),
                     "patient_id": hit.get("patient_id", ""),
                     "owner_user_id": hit.get("owner_user_id", 0),
+                    "content_fingerprint": hit.get("content_fingerprint", ""),
+                    "placement_fingerprint": hit.get("placement_fingerprint", ""),
+                    "embedding_normalization_version": hit.get(
+                        "embedding_normalization_version", ""
+                    ),
+                    "document_version": hit.get("document_version", 0),
+                    "content_sha256": hit.get("content_sha256", ""),
                     "chunk_kind": hit.get("chunk_kind", ""),
                     "structure_type": hit.get("structure_type", ""),
                     "section_path": hit.get("section_path", ""),
@@ -322,7 +374,7 @@ class MilvusStore:
                     "qa_question": hit.get("qa_question", ""),
                     "score": hit.get("distance", 0.0),
                 })
-        return formatted_results
+        return _deduplicate_versioned_results(formatted_results, top_k)
 
     def dense_retrieve(
         self,
@@ -336,7 +388,7 @@ class MilvusStore:
                 data=[dense_embedding],
                 anns_field="dense_embedding",
                 search_params={"metric_type": "IP", "params": {"ef": 64}},
-                limit=top_k,
+                limit=top_k * 3,
                 output_fields=[
                     "text",
                     "filename",
@@ -357,8 +409,10 @@ class MilvusStore:
                     "section_path",
                     "source_dataset",
                     "qa_question",
+                    *VERSION_OUTPUT_FIELDS,
                 ],
                 filter=filter_expr,
+                consistency_level=_read_consistency_level(),
             )
 
         results = self._run(_search)
@@ -381,6 +435,17 @@ class MilvusStore:
                     "tenant_id": hit.get("entity", {}).get("tenant_id", ""),
                     "patient_id": hit.get("entity", {}).get("patient_id", ""),
                     "owner_user_id": hit.get("entity", {}).get("owner_user_id", 0),
+                    "content_fingerprint": hit.get("entity", {}).get(
+                        "content_fingerprint", ""
+                    ),
+                    "placement_fingerprint": hit.get("entity", {}).get(
+                        "placement_fingerprint", ""
+                    ),
+                    "embedding_normalization_version": hit.get("entity", {}).get(
+                        "embedding_normalization_version", ""
+                    ),
+                    "document_version": hit.get("entity", {}).get("document_version", 0),
+                    "content_sha256": hit.get("entity", {}).get("content_sha256", ""),
                     "chunk_kind": hit.get("entity", {}).get("chunk_kind", ""),
                     "structure_type": hit.get("entity", {}).get("structure_type", ""),
                     "section_path": hit.get("entity", {}).get("section_path", ""),
@@ -388,7 +453,7 @@ class MilvusStore:
                     "qa_question": hit.get("entity", {}).get("qa_question", ""),
                     "score": hit.get("distance", 0.0),
                 })
-        return formatted_results
+        return _deduplicate_versioned_results(formatted_results, top_k)
 
     def sparse_retrieve(
         self,
@@ -402,7 +467,7 @@ class MilvusStore:
                 data=[query],
                 anns_field="sparse_embedding",
                 search_params={"metric_type": "BM25", "params": {"drop_ratio_search": 0.2}},
-                limit=top_k,
+                limit=top_k * 3,
                 output_fields=[
                     "text",
                     "filename",
@@ -423,8 +488,10 @@ class MilvusStore:
                     "section_path",
                     "source_dataset",
                     "qa_question",
+                    *VERSION_OUTPUT_FIELDS,
                 ],
                 filter=filter_expr,
+                consistency_level=_read_consistency_level(),
             )
 
         results = self._run(_search)
@@ -448,6 +515,13 @@ class MilvusStore:
                     "tenant_id": entity.get("tenant_id", ""),
                     "patient_id": entity.get("patient_id", ""),
                     "owner_user_id": entity.get("owner_user_id", 0),
+                    "content_fingerprint": entity.get("content_fingerprint", ""),
+                    "placement_fingerprint": entity.get("placement_fingerprint", ""),
+                    "embedding_normalization_version": entity.get(
+                        "embedding_normalization_version", ""
+                    ),
+                    "document_version": entity.get("document_version", 0),
+                    "content_sha256": entity.get("content_sha256", ""),
                     "chunk_kind": entity.get("chunk_kind", ""),
                     "structure_type": entity.get("structure_type", ""),
                     "section_path": entity.get("section_path", ""),
@@ -455,12 +529,16 @@ class MilvusStore:
                     "qa_question": entity.get("qa_question", ""),
                     "score": hit.get("distance", 0.0),
                 })
-        return formatted_results
+        return _deduplicate_versioned_results(formatted_results, top_k)
 
     def delete(self, filter_expr: str):
-        return self._run(
-            lambda client: client.delete(collection_name=self.collection_name, filter=filter_expr)
-        )
+        def _delete(client: MilvusClient):
+            result = client.delete(collection_name=self.collection_name, filter=filter_expr)
+            if os.getenv("MILVUS_FLUSH_AFTER_DELETE", "true").lower() == "true":
+                client.flush(self.collection_name)
+            return result
+
+        return self._run(_delete)
 
     def has_collection(self) -> bool:
         return self._run(lambda client: client.has_collection(self.collection_name))

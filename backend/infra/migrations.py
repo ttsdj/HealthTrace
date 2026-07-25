@@ -12,6 +12,7 @@ PHASE4_VERSION = "2026_07_22_phase4_notification_delivery"
 PHASE5_VERSION = "2026_07_24_phase5_access_security"
 PHASE6_VERSION = "2026_07_24_phase6_jobs_golden_review"
 PHASE7_VERSION = "2026_07_25_incremental_document_versions"
+PHASE8_VERSION = "2026_07_25_reversible_document_versions"
 
 
 def _get_migration_status(engine: Engine, version: str) -> dict:
@@ -63,6 +64,11 @@ def get_phase6_migration_status(engine: Engine) -> dict:
 def get_phase7_migration_status(engine: Engine) -> dict:
     """Read incremental document version migration state."""
     return _get_migration_status(engine, PHASE7_VERSION)
+
+
+def get_phase8_migration_status(engine: Engine) -> dict:
+    """Read reversible document version migration state."""
+    return _get_migration_status(engine, PHASE8_VERSION)
 
 
 def _add_column_if_missing(conn, table_name: str, column_name: str, ddl: str) -> bool:
@@ -689,6 +695,103 @@ def rollback_phase7_incremental_document_migration(engine: Engine) -> dict:
         db.commit()
     return {
         "version": PHASE7_VERSION,
+        "status": "rolled_back",
+        "data_preserved": True,
+    }
+
+
+def apply_phase8_reversible_document_migration(engine: Engine) -> dict:
+    """Add cold-retention metadata and versioned parent snapshots."""
+    from backend.db.models import SchemaMigration
+    from backend.infra.database import Base
+    from sqlalchemy.orm import Session
+
+    changes: list[str] = []
+    table_name = "document_version_parent_chunks"
+    existed = inspect(engine).has_table(table_name)
+    Base.metadata.create_all(bind=engine)
+    if not inspect(engine).has_table("document_versions"):
+        raise RuntimeError("Phase 8 requires the document_versions table")
+
+    with engine.begin() as conn:
+        if _add_column_if_missing(
+            conn,
+            "document_versions",
+            "retention_until",
+            "TIMESTAMP NULL",
+        ):
+            changes.append("document_versions.retention_until")
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_document_versions_retention_until "
+                "ON document_versions (retention_until)"
+            )
+        )
+
+    if not inspect(engine).has_table(table_name):
+        raise RuntimeError("Phase 8 parent snapshot table was not created")
+    if not existed:
+        changes.append(table_name)
+
+    now = datetime.utcnow()
+    details = {
+        "mode": "additive",
+        "changes": changes,
+        "archive": "separate_milvus_collection",
+        "retention_days": 7,
+        "rollback": "disable rollback and GC endpoints; preserve cold vectors and snapshots",
+    }
+    with Session(engine) as db:
+        record = (
+            db.query(SchemaMigration)
+            .filter(SchemaMigration.version == PHASE8_VERSION)
+            .first()
+        )
+        if record is None:
+            db.add(
+                SchemaMigration(
+                    version=PHASE8_VERSION,
+                    status="applied",
+                    details_json=details,
+                    applied_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            record.status = "applied"
+            record.details_json = details
+            record.updated_at = now
+        db.commit()
+    return {"version": PHASE8_VERSION, "status": "applied", "changes": changes}
+
+
+def rollback_phase8_reversible_document_migration(engine: Engine) -> dict:
+    """Disable reversible versions without deleting retained data."""
+    status = get_phase8_migration_status(engine)
+    if status["status"] == "not_applied":
+        return {"version": PHASE8_VERSION, "status": "not_applied"}
+
+    from backend.db.models import SchemaMigration
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as db:
+        record = (
+            db.query(SchemaMigration)
+            .filter(SchemaMigration.version == PHASE8_VERSION)
+            .first()
+        )
+        if record is None:
+            return {"version": PHASE8_VERSION, "status": "not_applied"}
+        record.status = "rolled_back"
+        record.updated_at = datetime.utcnow()
+        record.details_json = {
+            **(record.details_json or {}),
+            "rollback": "HEALTHTRACE_VERSION_RETENTION_ENABLED=false",
+        }
+        db.commit()
+    return {
+        "version": PHASE8_VERSION,
         "status": "rolled_back",
         "data_preserved": True,
     }

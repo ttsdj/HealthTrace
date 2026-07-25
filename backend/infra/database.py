@@ -94,6 +94,7 @@ def init_db() -> None:
             apply_phase5_access_security_migration,
             apply_phase6_jobs_golden_migration,
             apply_phase7_incremental_document_migration,
+            apply_phase8_reversible_document_migration,
         )
 
         apply_phase1_migration(engine)
@@ -103,3 +104,4 @@ def init_db() -> None:
         apply_phase5_access_security_migration(engine)
         apply_phase6_jobs_golden_migration(engine)
         apply_phase7_incremental_document_migration(engine)
+        apply_phase8_reversible_document_migration(engine)

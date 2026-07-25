@@ -248,6 +248,19 @@ docker compose -f docker-compose.yml -f docker-compose.app.yml up -d --build
 
 完整协议和 API 见 [`docs/INCREMENTAL_DOCUMENT_UPDATES.md`](docs/INCREMENTAL_DOCUMENT_UPDATES.md)。
 
+## Reversible Incremental Updates
+
+Incremental updates copy reusable vector values into fresh Milvus rows; they
+never reuse a Milvus primary key. Superseded vectors and parent mappings are
+retained for a configurable rollback window and purged asynchronously after
+expiry. See
+[`docs/REVERSIBLE_INCREMENTAL_UPDATES.md`](docs/REVERSIBLE_INCREMENTAL_UPDATES.md).
+
+```cmd
+.venv\Scripts\python.exe scripts\migrate_phase8_reversible_documents.py apply
+.venv\Scripts\python.exe scripts\purge_expired_document_versions.py
+```
+
 ## License
 
 MIT

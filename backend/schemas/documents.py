@@ -25,6 +25,8 @@ class DocumentVersionInfo(BaseModel):
     deleted_vectors: int
     created_at: str
     activated_at: Optional[str] = None
+    retention_until: Optional[str] = None
+    archived_vectors: int = 0
     error: str = ""
 
 
@@ -32,6 +34,18 @@ class DocumentVersionListResponse(BaseModel):
     document_id: str
     filename: str
     versions: List[DocumentVersionInfo]
+
+
+class DocumentRollbackResponse(BaseModel):
+    document_id: str
+    filename: str
+    version: int
+    previous_version: int
+    parent_chunks: int
+    leaf_chunks: int
+    restored_vectors: int
+    archived_vectors: int
+    message: str
 
 
 class DocumentUploadResponse(BaseModel):

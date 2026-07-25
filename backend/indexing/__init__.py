@@ -2,6 +2,7 @@ from backend.indexing.document_loader import DocumentLoader
 from backend.indexing.embedding import embedding_service
 from backend.indexing.incremental_update import (
     IncrementalDocumentIndexer,
+    IncrementalRollbackResult,
     IncrementalUpdateResult,
     chunk_content_fingerprint,
     public_document_id,
@@ -14,6 +15,7 @@ __all__ = [
     "DocumentLoader",
     "embedding_service",
     "IncrementalDocumentIndexer",
+    "IncrementalRollbackResult",
     "IncrementalUpdateResult",
     "chunk_content_fingerprint",
     "public_document_id",

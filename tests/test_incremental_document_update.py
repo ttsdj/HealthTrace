@@ -4,16 +4,27 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.db.models import DocumentRecord, DocumentVersion, ParentChunk
+from backend.db.models import (
+    DocumentRecord,
+    DocumentVersion,
+    DocumentVersionParentChunk,
+    ParentChunk,
+)
 from backend.indexing.incremental_update import (
     IncrementalDocumentIndexer,
     build_embedding_reuse_plan,
     chunk_content_fingerprint,
 )
+from backend.indexing.text_normalization import (
+    canonicalize_embedding_text,
+    embedding_normalization_version,
+)
 from backend.infra.database import Base
 from backend.infra.migrations import (
     apply_phase7_incremental_document_migration,
+    apply_phase8_reversible_document_migration,
     get_phase7_migration_status,
+    get_phase8_migration_status,
     rollback_phase7_incremental_document_migration,
 )
 
@@ -96,6 +107,7 @@ def _old_vector_row():
         "tenant_id": "",
         "patient_id": "",
         "owner_user_id": 0,
+        "embedding_normalization_version": embedding_normalization_version(),
     }
 
 
@@ -128,6 +140,7 @@ def _new_documents(canonical: Path):
 
 
 def _test_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("HEALTHTRACE_VERSION_RETENTION_ENABLED", "false")
     engine = create_engine(
         f"sqlite:///{tmp_path / 'incremental.db'}",
         connect_args={"check_same_thread": False},
@@ -182,6 +195,37 @@ def test_content_fingerprint_reuses_vectors_across_positional_id_changes():
     assert embedded == 0
 
 
+def test_embedding_identity_normalizes_width_and_whitespace(monkeypatch):
+    monkeypatch.delenv("DOCUMENT_EMBEDDING_IGNORE_LINE_PATTERNS", raising=False)
+    assert canonicalize_embedding_text("Ａ药\t适用\n于 某病") == "A药 适用 于 某病"
+    assert chunk_content_fingerprint("Ａ药\t适用\n于 某病") == chunk_content_fingerprint(
+        "A药 适用 于 某病"
+    )
+
+
+def test_embedding_identity_can_exclude_configured_metadata_lines(monkeypatch):
+    monkeypatch.setenv(
+        "DOCUMENT_EMBEDDING_IGNORE_LINE_PATTERNS",
+        r"^生成时间[:：].*$;;^导出时间[:：].*$",
+    )
+    assert chunk_content_fingerprint(
+        "正文\n生成时间：2026-07-25"
+    ) == chunk_content_fingerprint("正文\n生成时间：2026-07-26")
+
+
+def test_changed_normalization_rules_force_reembedding(monkeypatch):
+    monkeypatch.delenv("DOCUMENT_EMBEDDING_IGNORE_LINE_PATTERNS", raising=False)
+    old = _old_vector_row()
+    monkeypatch.setenv("DOCUMENT_EMBEDDING_IGNORE_LINE_PATTERNS", r"^生成时间[:：].*$")
+    new = [{"text": old["text"], "chunk_id": "same-content"}]
+
+    embeddings, reused, embedded = build_embedding_reuse_plan(new, [old])
+
+    assert embeddings == [None]
+    assert reused == 0
+    assert embedded == 1
+
+
 def test_phase7_migration_is_additive_and_rollback_preserves_table(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'phase7.db'}")
 
@@ -192,6 +236,16 @@ def test_phase7_migration_is_additive_and_rollback_preserves_table(tmp_path):
     rolled_back = rollback_phase7_incremental_document_migration(engine)
     assert rolled_back["data_preserved"] is True
     assert get_phase7_migration_status(engine)["status"] == "rolled_back"
+
+
+def test_phase8_migration_adds_reversible_version_storage(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'phase8.db'}")
+    apply_phase7_incremental_document_migration(engine)
+
+    result = apply_phase8_reversible_document_migration(engine)
+
+    assert result["status"] == "applied"
+    assert get_phase8_migration_status(engine)["status"] == "applied"
 
 
 def test_incremental_switch_reuses_embedding_and_activates_version(tmp_path, monkeypatch):

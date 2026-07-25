@@ -44,7 +44,11 @@ from backend.schemas.patient import (
     PatientSearchRequest,
     PatientSearchResponse,
 )
-from backend.schemas.documents import DocumentVersionInfo, DocumentVersionListResponse
+from backend.schemas.documents import (
+    DocumentRollbackResponse,
+    DocumentVersionInfo,
+    DocumentVersionListResponse,
+)
 
 router = APIRouter(prefix="/patient", tags=["patient-records"])
 PRIVATE_ROOT = DATA_DIR / "documents" / "private"
@@ -317,10 +321,59 @@ async def list_patient_document_versions(
                 activated_at=(
                     item.activated_at.isoformat() + "Z" if item.activated_at else None
                 ),
+                retention_until=(
+                    item.retention_until.isoformat() + "Z"
+                    if item.retention_until
+                    else None
+                ),
+                archived_vectors=int(
+                    (item.metadata_json or {}).get("archived_vectors", 0)
+                ),
                 error=item.error_message,
             )
             for item in versions
         ],
+    )
+
+
+@router.post(
+    "/documents/{document_id}/versions/{version}/rollback",
+    response_model=DocumentRollbackResponse,
+)
+async def rollback_patient_document_version(
+    document_id: str,
+    version: int,
+    scope: PatientScope = Depends(get_current_patient_write_scope),
+    db: Session = Depends(get_db),
+):
+    record = _scoped_record_query(db, scope).filter(DocumentRecord.id == document_id).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Patient document not found")
+    patient_store = get_milvus_store("patient_record")
+    indexer = IncrementalDocumentIndexer(
+        patient_store,
+        MilvusWriter(embedding_service, patient_store),
+        parent_chunk_store,
+    )
+    try:
+        result = indexer.rollback(
+            document_id=document_id,
+            target_version_number=version,
+            created_by_user_id=scope.user_id,
+        )
+    except (LookupError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Patient document rollback failed; active version retained: {exc}",
+        ) from exc
+    return DocumentRollbackResponse(
+        filename=record.filename,
+        message=f"Patient document restored to version {result.version}",
+        **result.to_dict(),
     )
 
 

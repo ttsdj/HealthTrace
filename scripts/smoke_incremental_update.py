@@ -31,7 +31,7 @@ def main() -> int:
     os.environ.setdefault("DENSE_EMBEDDING_DIM", "1024")
 
     from backend.db.models import DocumentRecord, DocumentVersion, ParentChunk
-    from backend.indexing import IncrementalDocumentIndexer, MilvusWriter, get_milvus_store
+    from backend.indexing import IncrementalDocumentIndexer, MilvusStore, MilvusWriter
     from backend.indexing.embedding import EmbeddingService
     from backend.infra.database import SessionLocal
 
@@ -43,9 +43,16 @@ def main() -> int:
     stage1 = root / f"stage1-{filename}"
     stage2 = root / f"stage2-{filename}"
     collection = f"healthtrace_incremental_smoke_{suffix}"
-    store = get_milvus_store(collection)
+    archive_collection = f"{collection}_archive"
+    store = MilvusStore.for_collection(collection)
+    archive_store = MilvusStore.for_collection(archive_collection)
     writer = MilvusWriter(EmbeddingService(), store)
-    indexer = IncrementalDocumentIndexer(store, writer)
+    indexer = IncrementalDocumentIndexer(
+        store,
+        writer,
+        archive_store=archive_store,
+        archive_writer=MilvusWriter(EmbeddingService(), archive_store),
+    )
     file_paths: set[Path] = {canonical, stage1, stage2}
 
     try:
@@ -128,7 +135,26 @@ def main() -> int:
         assert second.reused_vectors == 1
         assert second.embedded_vectors == 1
         assert second.version == 2
-        print(json.dumps({"first": first.to_dict(), "second": second.to_dict()}, indent=2))
+        assert second.archived_vectors == 2
+
+        rollback = indexer.rollback(
+            document_id=document_id,
+            target_version_number=1,
+        )
+        assert rollback.version == 1
+        assert rollback.previous_version == 2
+        assert rollback.restored_vectors == 2
+        assert canonical.read_text(encoding="utf-8") == "version one"
+        print(
+            json.dumps(
+                {
+                    "first": first.to_dict(),
+                    "second": second.to_dict(),
+                    "rollback": rollback.to_dict(),
+                },
+                indent=2,
+            )
+        )
         return 0
     finally:
         db = SessionLocal()
@@ -150,6 +176,10 @@ def main() -> int:
             db.close()
         try:
             store.drop_collection()
+        except Exception:
+            pass
+        try:
+            archive_store.drop_collection()
         except Exception:
             pass
         for path in file_paths:

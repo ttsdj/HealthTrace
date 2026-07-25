@@ -44,6 +44,10 @@ class MilvusWriter:
             "index_update_id",
             "document_version",
             "content_sha256",
+            "placement_fingerprint",
+            "embedding_normalization_version",
+            "archived_version_id",
+            "retention_until_epoch",
         ):
             if doc.get(key) not in (None, ""):
                 payload[key] = doc[key]

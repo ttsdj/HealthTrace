@@ -4,6 +4,7 @@ import hashlib
 import threading
 
 from backend.env import load_env
+from backend.indexing.text_normalization import canonicalize_embedding_text
 
 load_env()
 
@@ -57,11 +58,12 @@ class EmbeddingService:
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        canonical_texts = [canonicalize_embedding_text(text) for text in texts]
         if os.getenv("EMBEDDING_BACKEND", "").strip().lower() == "hash":
             dim = int(os.getenv("DENSE_EMBEDDING_DIM", "1024"))
-            return [_hash_embedding(text, dim) for text in texts]
+            return [_hash_embedding(text, dim) for text in canonical_texts]
         try:
-            return self._get_embedder().embed_documents(texts)
+            return self._get_embedder().embed_documents(canonical_texts)
         except Exception as e:
             raise Exception(f"本地密集嵌入模型调用失败: {str(e)}") from e
 
