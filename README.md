@@ -237,6 +237,17 @@ docker compose -f docker-compose.yml -f docker-compose.app.yml up -d --build
 4. 接入集中式 KMS、日志平台、Prometheus/Grafana 与 OTLP Collector，完成恢复演练。
 5. 在硬件或外部推理资源满足后开展多模态 POC，并持续做检索、生成、Agent、安全和性能消融。
 
+## 存量知识更新
+
+同一公共文档再次上传，或调用患者文档 `PUT` 接口时，HealthTrace 会先在 staging 完成解析和向量准备，再切换 active version。系统通过 chunk 内容指纹复用未变化的 BGE-M3 向量，只重新计算变化部分；任一步失败都会补偿恢复旧向量、父块和原文件。
+
+```cmd
+.venv\Scripts\python.exe scripts\migrate_phase7_incremental_documents.py status
+.venv\Scripts\python.exe scripts\smoke_incremental_update.py
+```
+
+完整协议和 API 见 [`docs/INCREMENTAL_DOCUMENT_UPDATES.md`](docs/INCREMENTAL_DOCUMENT_UPDATES.md)。
+
 ## License
 
 MIT

@@ -132,18 +132,22 @@ def _check_llm_config() -> dict:
 def _patient_capabilities() -> dict:
     migration_status = "unknown"
     candidate_migration_status = "unknown"
+    incremental_migration_status = "unknown"
     try:
         from backend.infra.database import engine
         from backend.infra.migrations import (
             get_phase1_migration_status,
             get_phase2_migration_status,
+            get_phase7_migration_status,
         )
 
         migration_status = get_phase1_migration_status(engine)["status"]
         candidate_migration_status = get_phase2_migration_status(engine)["status"]
+        incremental_migration_status = get_phase7_migration_status(engine)["status"]
     except Exception:
         migration_status = "unavailable"
         candidate_migration_status = "unavailable"
+        incremental_migration_status = "unavailable"
     from backend.observability.telemetry import telemetry_status
 
     return {
@@ -153,6 +157,11 @@ def _patient_capabilities() -> dict:
         == "true",
         "phase1_migration": migration_status,
         "phase2_fact_candidates": candidate_migration_status,
+        "phase7_incremental_documents": incremental_migration_status,
+        "incremental_document_updates_enabled": os.getenv(
+            "HEALTHTRACE_INCREMENTAL_UPDATE_ENABLED", "true"
+        ).lower()
+        == "true",
         "fact_candidates_enabled": os.getenv(
             "HEALTHTRACE_FACT_CANDIDATES_ENABLED", "true"
         ).lower()

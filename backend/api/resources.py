@@ -1,4 +1,6 @@
+import hashlib
 import os
+from datetime import datetime
 from pathlib import Path
 
 from backend.indexing import (
@@ -6,7 +8,10 @@ from backend.indexing import (
     MilvusWriter,
     ParentChunkStore,
     embedding_service,
+    public_document_id,
 )
+from backend.db.models import DocumentRecord, DocumentVersion
+from backend.infra.database import SessionLocal
 from backend.indexing.milvus_client import get_milvus_store
 from backend.indexing.ocr import IMAGE_EXTENSIONS
 
@@ -65,6 +70,34 @@ def delete_document_transactionally(filename: str, job_manager=None, job_id=None
     if job_manager and job_id:
         job_manager.complete_step(job_id, "parent_store", "父级分块及 Redis 缓存已清空")
 
+    db = SessionLocal()
+    try:
+        record = (
+            db.query(DocumentRecord)
+            .filter(DocumentRecord.id == public_document_id(filename))
+            .first()
+        )
+        if record is not None:
+            now = datetime.utcnow()
+            record.status = "deleted"
+            record.error_message = ""
+            record.updated_at = now
+            record.metadata_json = {
+                **(record.metadata_json or {}),
+                "deleted_at": now.isoformat() + "Z",
+            }
+            (
+                db.query(DocumentVersion)
+                .filter(
+                    DocumentVersion.document_id == record.id,
+                    DocumentVersion.status == "active",
+                )
+                .update({"status": "deleted"}, synchronize_session=False)
+            )
+            db.commit()
+    finally:
+        db.close()
+
     return chunks_deleted
 
 
@@ -79,13 +112,17 @@ def is_supported_document(filename: str) -> bool:
     )
 
 
-async def save_upload_file(file, file_path: Path) -> None:
+async def save_upload_file(file, file_path: Path) -> str:
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
     with open(file_path, "wb") as f:
         while True:
             chunk = await file.read(1024 * 1024)
             if not chunk:
                 break
+            digest.update(chunk)
             f.write(chunk)
+    return digest.hexdigest()
 
 
 def ensure_upload_dir() -> None:

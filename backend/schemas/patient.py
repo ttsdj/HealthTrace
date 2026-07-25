@@ -32,6 +32,11 @@ class PatientDocumentUploadResponse(BaseModel):
     parent_chunks: int
     leaf_chunks: int
     status: str
+    version: int = 1
+    reused_vectors: int = 0
+    embedded_vectors: int = 0
+    deleted_vectors: int = 0
+    unchanged: bool = False
 
 
 class PatientDocumentUploadStartResponse(BaseModel):
@@ -39,6 +44,19 @@ class PatientDocumentUploadStartResponse(BaseModel):
     document_id: str
     filename: str
     status: str
+
+
+class PatientDocumentUpdateResponse(BaseModel):
+    document_id: str
+    filename: str
+    status: str
+    version: int
+    parent_chunks: int
+    leaf_chunks: int
+    reused_vectors: int
+    embedded_vectors: int
+    deleted_vectors: int
+    unchanged: bool = False
 
 
 class PatientSearchRequest(BaseModel):

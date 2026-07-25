@@ -11,6 +11,7 @@ PHASE3_VERSION = "2026_07_22_phase3_long_term_tasks"
 PHASE4_VERSION = "2026_07_22_phase4_notification_delivery"
 PHASE5_VERSION = "2026_07_24_phase5_access_security"
 PHASE6_VERSION = "2026_07_24_phase6_jobs_golden_review"
+PHASE7_VERSION = "2026_07_25_incremental_document_versions"
 
 
 def _get_migration_status(engine: Engine, version: str) -> dict:
@@ -57,6 +58,11 @@ def get_phase5_migration_status(engine: Engine) -> dict:
 def get_phase6_migration_status(engine: Engine) -> dict:
     """Read durable background job and golden review migration state."""
     return _get_migration_status(engine, PHASE6_VERSION)
+
+
+def get_phase7_migration_status(engine: Engine) -> dict:
+    """Read incremental document version migration state."""
+    return _get_migration_status(engine, PHASE7_VERSION)
 
 
 def _add_column_if_missing(conn, table_name: str, column_name: str, ddl: str) -> bool:
@@ -604,6 +610,85 @@ def rollback_phase6_jobs_golden_migration(engine: Engine) -> dict:
         db.commit()
     return {
         "version": PHASE6_VERSION,
+        "status": "rolled_back",
+        "data_preserved": True,
+    }
+
+
+def apply_phase7_incremental_document_migration(engine: Engine) -> dict:
+    """Add document version audit storage without changing indexed data."""
+    from backend.db.models import SchemaMigration
+    from backend.infra.database import Base
+    from sqlalchemy.orm import Session
+
+    table_name = "document_versions"
+    existed = inspect(engine).has_table(table_name)
+    Base.metadata.create_all(bind=engine)
+    if not inspect(engine).has_table(table_name):
+        raise RuntimeError("Phase 7 document_versions table was not created")
+
+    now = datetime.utcnow()
+    details = {
+        "mode": "additive",
+        "changes": [] if existed else [table_name],
+        "protocol": "prepare_insert_switch_compensate",
+        "vector_reuse": "normalized_chunk_fingerprint",
+        "rollback": "disable incremental update endpoints; preserve version audit rows",
+    }
+    with Session(engine) as db:
+        record = (
+            db.query(SchemaMigration)
+            .filter(SchemaMigration.version == PHASE7_VERSION)
+            .first()
+        )
+        if record is None:
+            db.add(
+                SchemaMigration(
+                    version=PHASE7_VERSION,
+                    status="applied",
+                    details_json=details,
+                    applied_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            record.status = "applied"
+            record.details_json = details
+            record.updated_at = now
+        db.commit()
+    return {
+        "version": PHASE7_VERSION,
+        "status": "applied",
+        "changes": details["changes"],
+    }
+
+
+def rollback_phase7_incremental_document_migration(engine: Engine) -> dict:
+    """Disable incremental updates while preserving every document version row."""
+    status = get_phase7_migration_status(engine)
+    if status["status"] == "not_applied":
+        return {"version": PHASE7_VERSION, "status": "not_applied"}
+
+    from backend.db.models import SchemaMigration
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as db:
+        record = (
+            db.query(SchemaMigration)
+            .filter(SchemaMigration.version == PHASE7_VERSION)
+            .first()
+        )
+        if record is None:
+            return {"version": PHASE7_VERSION, "status": "not_applied"}
+        record.status = "rolled_back"
+        record.updated_at = datetime.utcnow()
+        record.details_json = {
+            **(record.details_json or {}),
+            "rollback": "HEALTHTRACE_INCREMENTAL_UPDATE_ENABLED=false",
+        }
+        db.commit()
+    return {
+        "version": PHASE7_VERSION,
         "status": "rolled_back",
         "data_preserved": True,
     }

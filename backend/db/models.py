@@ -162,6 +162,38 @@ class DocumentRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class DocumentVersion(Base):
+    __tablename__ = "document_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "version_number",
+            name="uq_document_version_number",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("document_records.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    storage_uri: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="staging", nullable=False, index=True)
+    parent_chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    leaf_chunk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    reused_vector_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    embedded_vector_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    deleted_vector_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class PatientFactCandidate(Base):
     __tablename__ = "patient_fact_candidates"
     __table_args__ = (

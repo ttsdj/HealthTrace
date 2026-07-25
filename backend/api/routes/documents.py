@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -15,7 +16,8 @@ from backend.api.resources import (
     parent_chunk_store,
     save_upload_file,
 )
-from backend.db.models import BackgroundJob, User
+from backend.db.models import BackgroundJob, DocumentRecord, DocumentVersion, User
+from backend.indexing import IncrementalDocumentIndexer, public_document_id
 from backend.infra.auth import get_db, require_admin
 from backend.jobs import DELETE_STEPS, delete_job_manager, upload_job_manager
 from backend.jobs.queue import JobReporter, enqueue_job, job_snapshot
@@ -25,12 +27,61 @@ from backend.schemas import (
     DocumentDeleteStartResponse,
     DocumentInfo,
     DocumentListResponse,
+    DocumentVersionInfo,
+    DocumentVersionListResponse,
     DocumentUploadJobResponse,
     DocumentUploadResponse,
     DocumentUploadStartResponse,
 )
 
 router = APIRouter(tags=["documents"])
+incremental_indexer = IncrementalDocumentIndexer(
+    milvus_manager,
+    milvus_writer,
+    parent_chunk_store,
+)
+
+
+def _safe_public_filename(filename: str) -> str:
+    name = Path(filename or "").name.strip()
+    if not name or name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Filename is required")
+    return name
+
+
+def _apply_public_update(
+    *,
+    staging_path: Path,
+    filename: str,
+    content_sha256: str,
+    created_by_user_id: int | None,
+    progress_callback=None,
+):
+    new_docs = loader.load_document(str(staging_path), filename)
+    if not new_docs:
+        raise ValueError("Document processing failed: no content extracted")
+    parent_docs = [
+        doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) in (1, 2)
+    ]
+    leaf_docs = [
+        doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) == 3
+    ]
+    if not leaf_docs:
+        raise ValueError("Document processing failed: no searchable leaf chunks generated")
+    result = incremental_indexer.apply(
+        document_id=public_document_id(filename),
+        document_domain="public_medical",
+        filename=filename,
+        file_type=Path(filename).suffix.lstrip(".").upper(),
+        canonical_path=UPLOAD_DIR / filename,
+        staging_path=staging_path,
+        content_sha256=content_sha256,
+        parent_documents=parent_docs,
+        leaf_documents=leaf_docs,
+        created_by_user_id=created_by_user_id,
+        progress_callback=progress_callback,
+    )
+    return result, parent_docs, leaf_docs
 
 
 def _split_progressive_vector_batches(leaf_docs: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -135,16 +186,13 @@ def _process_upload_job(
     filename: str,
     reporter=upload_job_manager,
     *,
+    content_sha256: str = "",
+    created_by_user_id: int | None = None,
     raise_on_error: bool = False,
 ) -> dict:
-    failed_step = "cleanup"
+    failed_step = "parse"
     try:
         reporter.complete_step(job_id, "upload", "File saved on server")
-
-        failed_step = "cleanup"
-        reporter.update_step(job_id, "cleanup", 10, "running", "Cleaning old document version")
-        delete_document_transactionally(filename)
-        reporter.complete_step(job_id, "cleanup", "Old version cleaned")
 
         failed_step = "parse"
         reporter.update_step(
@@ -154,10 +202,12 @@ def _process_upload_job(
             "running",
             "Parsing and chunking document",
         )
-        new_docs = loader.load_document(file_path, filename)
-        if not new_docs:
-            raise ValueError("Document processing failed: no content extracted")
+        staging_path = Path(file_path)
+        if not content_sha256:
+            import hashlib
 
+            content_sha256 = hashlib.sha256(staging_path.read_bytes()).hexdigest()
+        new_docs = loader.load_document(str(staging_path), filename)
         parent_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) in (1, 2)]
         leaf_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) == 3]
         if not leaf_docs:
@@ -168,20 +218,67 @@ def _process_upload_job(
             f"Parse completed: {len(parent_docs)} parent chunks, {len(leaf_docs)} leaf chunks",
         )
 
-        failed_step = "parent_store"
-        reporter.update_step(job_id, "parent_store", 20, "running", "Writing parent chunks")
-        parent_chunk_store.upsert_documents(parent_docs)
-        reporter.complete_step(job_id, "parent_store", f"Parent chunks stored: {len(parent_docs)}")
+        failed_step = "cleanup"
+        reporter.update_step(
+            job_id,
+            "cleanup",
+            20,
+            "running",
+            "Computing incremental delta; active version remains searchable",
+        )
+        reporter.complete_step(job_id, "cleanup", "Incremental delta prepared")
 
         failed_step = "vector_store"
         total_leaf = len(leaf_docs)
-        _write_vectors_progressively(job_id, leaf_docs, reporter)
-        reporter.complete_step(job_id, "vector_store", f"Vector indexing completed: {total_leaf} leaf chunks")
+        reporter.update_step(
+            job_id,
+            "vector_store",
+            0,
+            "running",
+            f"Preparing reusable and new vectors: 0 / {total_leaf}",
+            total_chunks=total_leaf,
+            processed_chunks=0,
+        )
+
+        def _progress(processed: int, total: int) -> None:
+            reporter.update_step(
+                job_id,
+                "vector_store",
+                round(processed * 100 / total) if total else 100,
+                "running",
+                f"Preparing vectors: {processed} / {total}",
+                total_chunks=total,
+                processed_chunks=processed,
+            )
+
+        failed_step = "parent_store"
+        reporter.update_step(job_id, "parent_store", 20, "running", "Switching document version")
+        result = incremental_indexer.apply(
+            document_id=public_document_id(filename),
+            document_domain="public_medical",
+            filename=filename,
+            file_type=Path(filename).suffix.lstrip(".").upper(),
+            canonical_path=UPLOAD_DIR / filename,
+            staging_path=staging_path,
+            content_sha256=content_sha256,
+            parent_documents=parent_docs,
+            leaf_documents=leaf_docs,
+            created_by_user_id=created_by_user_id,
+            progress_callback=_progress,
+        )
+        reporter.complete_step(
+            job_id,
+            "vector_store",
+            (
+                f"Version {result.version}: reused {result.reused_vectors}, "
+                f"embedded {result.embedded_vectors}"
+            ),
+        )
+        reporter.complete_step(job_id, "parent_store", f"Active version switched to {result.version}")
         reporter.complete_job(job_id, f"Uploaded and indexed {filename}")
         return {
             "filename": filename,
-            "parent_chunks": len(parent_docs),
-            "leaf_chunks": total_leaf,
+            **result.to_dict(),
         }
     except Exception as e:
         reporter.fail_job(job_id, failed_step, str(e))
@@ -216,6 +313,8 @@ def process_queued_upload(job_id: str, payload: dict) -> dict:
         str(payload["file_path"]),
         str(payload["filename"]),
         JobReporter(job_id),
+        content_sha256=str(payload.get("content_sha256") or ""),
+        created_by_user_id=payload.get("created_by_user_id"),
         raise_on_error=True,
     )
 
@@ -256,15 +355,57 @@ async def list_documents(_: User = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=f"Failed to list documents: {str(e)}")
 
 
+@router.get(
+    "/documents/{filename}/versions",
+    response_model=DocumentVersionListResponse,
+)
+async def list_document_versions(
+    filename: str,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    safe_name = _safe_public_filename(filename)
+    document_id = public_document_id(safe_name)
+    record = db.query(DocumentRecord).filter(DocumentRecord.id == document_id).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    versions = (
+        db.query(DocumentVersion)
+        .filter(DocumentVersion.document_id == document_id)
+        .order_by(DocumentVersion.version_number.desc())
+        .all()
+    )
+    return DocumentVersionListResponse(
+        document_id=document_id,
+        filename=record.filename,
+        versions=[
+            DocumentVersionInfo(
+                version=item.version_number,
+                status=item.status,
+                content_sha256=item.content_sha256,
+                parent_chunks=item.parent_chunk_count,
+                leaf_chunks=item.leaf_chunk_count,
+                reused_vectors=item.reused_vector_count,
+                embedded_vectors=item.embedded_vector_count,
+                deleted_vectors=item.deleted_vector_count,
+                created_at=item.created_at.isoformat() + "Z",
+                activated_at=(
+                    item.activated_at.isoformat() + "Z" if item.activated_at else None
+                ),
+                error=item.error_message,
+            )
+            for item in versions
+        ],
+    )
+
+
 @router.post("/documents/upload/async", response_model=DocumentUploadStartResponse)
 async def upload_document_async(
     file: UploadFile = File(...),
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    filename = file.filename or ""
-    if not filename:
-        raise HTTPException(status_code=400, detail="Filename is required")
+    filename = _safe_public_filename(file.filename or "")
     if not is_supported_document(filename):
         raise HTTPException(
             status_code=400,
@@ -273,11 +414,11 @@ async def upload_document_async(
 
     ensure_upload_dir()
     job = upload_job_manager.create_job(filename)
-    file_path = UPLOAD_DIR / filename
+    file_path = UPLOAD_DIR / ".staging" / job["job_id"] / filename
 
     try:
         upload_job_manager.update_step(job["job_id"], "upload", 1, "running", "Saving file")
-        await save_upload_file(file, file_path)
+        content_sha256 = await save_upload_file(file, file_path)
         upload_job_manager.complete_step(job["job_id"], "upload", "File uploaded, waiting for background processing")
     except Exception as e:
         upload_job_manager.fail_job(job["job_id"], "upload", f"File save failed: {e}")
@@ -288,7 +429,12 @@ async def upload_document_async(
         job_id=job["job_id"],
         job_type="document_upload",
         queue_name="default",
-        payload={"file_path": str(file_path), "filename": filename},
+        payload={
+            "file_path": str(file_path),
+            "filename": filename,
+            "content_sha256": content_sha256,
+            "created_by_user_id": current_user.id,
+        },
         progress=job,
         idempotency_key=f"upload:{filename}:{uuid4().hex}",
         created_by_user_id=current_user.id,
@@ -379,11 +525,12 @@ async def get_delete_job(
 
 
 @router.post("/documents/upload", response_model=DocumentUploadResponse)
-async def upload_document(file: UploadFile = File(...), _: User = Depends(require_admin)):
+async def upload_document(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_admin),
+):
     try:
-        filename = file.filename or ""
-        if not filename:
-            raise HTTPException(status_code=400, detail="Filename is required")
+        filename = _safe_public_filename(file.filename or "")
         if not is_supported_document(filename):
             raise HTTPException(
                 status_code=400,
@@ -391,34 +538,30 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
             )
 
         ensure_upload_dir()
-        delete_document_transactionally(filename)
-
-        file_path = UPLOAD_DIR / filename
-        content = await file.read()
-        file_path.write_bytes(content)
+        staging_path = UPLOAD_DIR / ".staging" / f"sync-{uuid4().hex}" / filename
+        content_sha256 = await save_upload_file(file, staging_path)
 
         try:
-            new_docs = loader.load_document(str(file_path), filename)
+            result, parent_docs, leaf_docs = _apply_public_update(
+                staging_path=staging_path,
+                filename=filename,
+                content_sha256=content_sha256,
+                created_by_user_id=current_user.id,
+            )
         except Exception as doc_err:
             raise HTTPException(status_code=500, detail=f"Document processing failed: {doc_err}")
-
-        if not new_docs:
-            raise HTTPException(status_code=500, detail="Document processing failed: no content extracted")
-
-        parent_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) in (1, 2)]
-        leaf_docs = [doc for doc in new_docs if int(doc.get("chunk_level", 0) or 0) == 3]
-        if not leaf_docs:
-            raise HTTPException(status_code=500, detail="Document processing failed: no searchable leaf chunks generated")
-
-        parent_chunk_store.upsert_documents(parent_docs)
-        milvus_writer.write_documents(leaf_docs)
 
         return DocumentUploadResponse(
             filename=filename,
             chunks_processed=len(leaf_docs),
+            version=result.version,
+            reused_vectors=result.reused_vectors,
+            embedded_vectors=result.embedded_vectors,
+            deleted_vectors=result.deleted_vectors,
+            unchanged=result.unchanged,
             message=(
-                f"Uploaded and indexed {filename}: {len(leaf_docs)} leaf chunks, "
-                f"{len(parent_docs)} parent chunks"
+                f"Activated {filename} version {result.version}: "
+                f"reused {result.reused_vectors}, embedded {result.embedded_vectors}"
             ),
         )
     except HTTPException:
