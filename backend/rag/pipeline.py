@@ -1,6 +1,7 @@
 from typing import Annotated, Literal, TypedDict, List, Optional
 import operator
 import os
+import threading
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, END
 from langgraph.types import Send
@@ -28,6 +29,13 @@ FAST_MODEL = os.getenv("FAST_MODEL") or MODEL
 _grader_model = None
 _router_model = None
 _complexity_model = None
+_RAG_SUB_AGENT_BULKHEAD = threading.BoundedSemaphore(
+    max(1, int(os.getenv("HEALTHTRACE_RAG_MAX_PARALLEL_BRANCHES", "8")))
+)
+_RAG_SUB_AGENT_QUEUE_TIMEOUT = max(
+    0.0,
+    float(os.getenv("HEALTHTRACE_RAG_BRANCH_QUEUE_TIMEOUT_SECONDS", "5")),
+)
 
 
 def _get_grader_model():
@@ -516,6 +524,9 @@ def _fanout_sub_questions(state: RAGState):
 def synthesis(state: RAGState) -> RAGState:
     """合并所有子 Agent 检索到的文档，去重排序后输出最终上下文。"""
     sub_results = state.get("sub_results", [])
+    failed_results = [
+        result for result in sub_results if result.get("status") == "error"
+    ]
     emit_rag_step("🔬", f"正在合成 {len(sub_results)} 个子问题的检索结果...")
 
     all_docs: List[dict] = []
@@ -548,12 +559,24 @@ def synthesis(state: RAGState) -> RAGState:
         "retrieved_chunks": deduped,
         "compressed_context_chunks": prompt_docs,
         "retrieval_stage": "synthesis",
+        "retrieval_mode": "parallel_synthesis" if deduped else "no_results",
+        "retrieval_degraded": bool(failed_results) or not deduped,
+        "retrieval_failure_reason": (
+            "all_sub_agents_failed"
+            if failed_results and len(failed_results) == len(sub_results)
+            else "all_sub_agents_empty"
+            if not deduped
+            else "partial_sub_agent_failure"
+            if failed_results
+            else ""
+        ),
         **_trace_quality_fields(deduped),
         **compression_meta,
         "complexity": "complex",
         "complexity_reason": state.get("complexity_reason", ""),
         "sub_questions": state.get("sub_questions", []),
         "sub_agent_count": len(sub_results),
+        "sub_agent_failed_count": len(failed_results),
         "synthesis_merged_count": len(all_docs),
         "sub_traces": sub_traces,
     }
@@ -602,17 +625,51 @@ _rag_sub_agent_graph = build_rag_sub_agent_graph()
 def rag_sub_agent(state: RAGState) -> RAGState:
     """包装子图，将子图结果封装为 sub_results 以便主图通过 reducer 合并。"""
     question = state.get("question", "")
+    acquired = _RAG_SUB_AGENT_BULKHEAD.acquire(
+        timeout=_RAG_SUB_AGENT_QUEUE_TIMEOUT
+    )
+    if not acquired:
+        emit_rag_step("⚠️", "子问题检索繁忙，已触发并发舱壁", question[:80])
+        return {
+            "sub_results": [{
+                "question": question,
+                "docs": [],
+                "rag_trace": None,
+                "status": "error",
+                "error_type": "bulkhead_rejected",
+            }],
+        }
+
     # 设置子 Agent 分组标识，使子图内所有 emit_rag_step 自动携带 group
     set_sub_agent_group(question)
     try:
-        result = _rag_sub_agent_graph.invoke(state)
+        try:
+            result = _rag_sub_agent_graph.invoke(state)
+        except Exception as exc:
+            emit_rag_step(
+                "⚠️",
+                "子问题检索失败，继续合成其余分支",
+                f"{question[:60]} ({type(exc).__name__})",
+            )
+            return {
+                "sub_results": [{
+                    "question": question,
+                    "docs": [],
+                    "rag_trace": None,
+                    "status": "error",
+                    "error_type": type(exc).__name__,
+                }],
+            }
     finally:
         clear_sub_agent_group()
+        _RAG_SUB_AGENT_BULKHEAD.release()
     return {
         "sub_results": [{
             "question": question,
             "docs": result.get("docs", []),
             "rag_trace": result.get("rag_trace"),
+            "status": "ok",
+            "error_type": "",
         }],
     }
 

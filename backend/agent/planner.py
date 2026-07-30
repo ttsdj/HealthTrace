@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from backend.agent.state import AgentAction, EvidenceState
+from backend.agent.intent_router import Intent, IntentRoute, route_intent
+from backend.agent.tool_registry import build_execution_plan
 from backend.db.models import User
 from backend.infra.database import SessionLocal
-from backend.medical_nlp.intent import analyze_medical_query
 from backend.medical_nlp.safety import analyze_medical_safety
 from backend.patient.context import required_resource_types, should_query_patient_context
 from backend.patient.facts import list_patient_facts
@@ -24,6 +25,8 @@ _FIELD_BY_RESOURCE = {
 class ConsultationPlan:
     intent: str
     risk_level: str
+    route: IntentRoute | None = None
+    execution_plan: dict = field(default_factory=dict)
     required_patient_fields: list[str] = field(default_factory=list)
     missing_fields: list[str] = field(default_factory=list)
     required_evidence_sources: list[str] = field(default_factory=list)
@@ -35,6 +38,8 @@ class ConsultationPlan:
         return {
             "consultation_orchestrator_enabled": True,
             "intent": self.intent,
+            "route": self.route.model_dump() if self.route else {},
+            "execution_plan": self.execution_plan,
             "risk_level": self.risk_level,
             "required_patient_fields": self.required_patient_fields,
             "missing_fields": self.missing_fields,
@@ -46,23 +51,32 @@ class ConsultationPlan:
 
 
 def plan_consultation(username: str, query: str) -> ConsultationPlan:
-    intent = analyze_medical_query(query).intent
+    route = route_intent(query)
+    intent = route.primary_intent.value
     safety = analyze_medical_safety(query)
-    if safety["high_risk_medical"]:
+    execution_plan = build_execution_plan(route)
+    if route.primary_intent == Intent.URGENT_CARE or safety["high_risk_medical"]:
         return ConsultationPlan(
             intent=intent,
             risk_level="high",
+            route=route,
+            execution_plan=execution_plan,
             required_evidence_sources=[],
             evidence_state=EvidenceState.HIGH_RISK,
             action=AgentAction.ESCALATE_URGENT,
             action_reason="deterministic_high_risk_guard",
         )
 
-    is_personal = should_query_patient_context(query)
+    is_personal = route.needs_patient_context or should_query_patient_context(query)
     resource_types = required_resource_types(query) if is_personal else []
     required_fields = [_FIELD_BY_RESOURCE[item] for item in resource_types]
     sources = ["public_rag"]
-    if intent in {"symptom_to_disease", "disease_profile", "drug_info"}:
+    if route.primary_intent in {
+        Intent.SYMPTOM_ASSESSMENT,
+        Intent.MEDICATION_SAFETY,
+        Intent.REPORT_INTERPRETATION,
+        Intent.GENERAL_MEDICAL_QA,
+    }:
         sources.append("medical_kg")
     if is_personal:
         sources.insert(0, "patient_facts")
@@ -88,11 +102,26 @@ def plan_consultation(username: str, query: str) -> ConsultationPlan:
         finally:
             db.close()
 
-    dosage_or_medication = safety["dosage_guard_triggered"] or intent == "drug_info"
+    dosage_or_medication = safety["dosage_guard_triggered"] or route.primary_intent == Intent.MEDICATION_SAFETY
+    if route.confidence < 0.60:
+        return ConsultationPlan(
+            intent=intent,
+            risk_level="guarded",
+            route=route,
+            execution_plan=execution_plan,
+            required_patient_fields=required_fields,
+            missing_fields=missing_fields,
+            required_evidence_sources=sources,
+            evidence_state=EvidenceState.LOW_CONFIDENCE_INPUT,
+            action=AgentAction.ASK,
+            action_reason="intent_route_low_confidence",
+        )
     if is_personal and required_fields and missing_fields:
         return ConsultationPlan(
             intent=intent,
             risk_level="guarded",
+            route=route,
+            execution_plan=execution_plan,
             required_patient_fields=required_fields,
             missing_fields=missing_fields,
             required_evidence_sources=sources,
@@ -105,9 +134,39 @@ def plan_consultation(username: str, query: str) -> ConsultationPlan:
             ),
         )
 
+    if route.primary_intent == Intent.HEALTH_TASK:
+        return ConsultationPlan(
+            intent=intent,
+            risk_level="normal",
+            route=route,
+            execution_plan=execution_plan,
+            required_patient_fields=required_fields,
+            missing_fields=missing_fields,
+            required_evidence_sources=[],
+            evidence_state=EvidenceState.PARTIAL,
+            action=AgentAction.CREATE_REMINDER,
+            action_reason="confirmation_required_health_task",
+        )
+
+    if route.primary_intent == Intent.CARE_NAVIGATION:
+        return ConsultationPlan(
+            intent=intent,
+            risk_level="normal",
+            route=route,
+            execution_plan=execution_plan,
+            required_patient_fields=required_fields,
+            missing_fields=missing_fields,
+            required_evidence_sources=sources,
+            evidence_state=EvidenceState.PARTIAL,
+            action=AgentAction.RECOMMEND_ROUTINE_VISIT,
+            action_reason="care_navigation_requested",
+        )
+
     return ConsultationPlan(
         intent=intent,
         risk_level="guarded" if dosage_or_medication else "normal",
+        route=route,
+        execution_plan=execution_plan,
         required_patient_fields=required_fields,
         missing_fields=missing_fields,
         required_evidence_sources=sources,
@@ -124,6 +183,8 @@ def preflight_response(plan: ConsultationPlan) -> str:
             "不要等待在线回答，也不要自行调整药物。若身边有人，请让对方协助就医。"
         )
     if plan.action == AgentAction.ASK:
+        if not plan.missing_fields:
+            return "我还不能可靠判断你的具体需求。请补充症状、检查项目、既往病史或你希望完成的健康任务。"
         labels = {
             "allergies": "是否有药物或食物过敏",
             "current_medications": "目前正在使用哪些药物及剂量",

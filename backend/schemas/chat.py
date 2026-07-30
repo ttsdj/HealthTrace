@@ -107,6 +107,8 @@ class RagTrace(BaseModel):
     ragas_evaluation_note: Optional[str] = None
     consultation_orchestrator_enabled: Optional[bool] = None
     intent: Optional[str] = None
+    intent_route: Optional[dict] = None
+    execution_plan: Optional[dict] = None
     risk_level: Optional[str] = None
     required_patient_fields: Optional[List[str]] = None
     missing_fields: Optional[List[str]] = None

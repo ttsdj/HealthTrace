@@ -5,7 +5,7 @@
 ```text
 RECEIVE
 → AUTHENTICATE + REDACT
-→ PLAN_CONSULTATION
+→ CLASSIFY_AND_PLAN（确定性安全前置 + 结构化 Intent Router）
    ├─ HIGH_RISK → ESCALATE_URGENT（不调用 LLM）
    ├─ PATIENT_DATA_MISSING → ASK
    └─ PREFLIGHT_PASSED → CONTEXT + TOOL AGENT
@@ -15,9 +15,12 @@ RECEIVE
 → PERSIST MESSAGE + TRACE + MEMORY
 ```
 
-当前 Evidence State：`SUFFICIENT / PARTIAL / CONFLICTING / NO_EVIDENCE / PATIENT_DATA_MISSING / LOW_CONFIDENCE_INPUT / HIGH_RISK`。
+当前定义的 Evidence State：`SUFFICIENT / PARTIAL / CONFLICTING / NO_EVIDENCE / PATIENT_DATA_MISSING / LOW_CONFIDENCE_INPUT / HIGH_RISK`。
 
-当前 Action：`ANSWER / ASK / CREATE_REMINDER / RECOMMEND_ROUTINE_VISIT / ESCALATE_URGENT / REFUSE`。
+当前定义的 Action：`ANSWER / ASK / CREATE_REMINDER / RECOMMEND_ROUTINE_VISIT / ESCALATE_URGENT / REFUSE`。
+
+`LOW_CONFIDENCE_INPUT → ASK`，`CREATE_REMINDER` 会生成确认前草稿，
+`RECOMMEND_ROUTINE_VISIT` 会返回常规就医建议；三者均进入统一 Action Policy。
 
 ## 已实现的确定性策略
 
@@ -28,8 +31,6 @@ RECEIVE
 
 ## 尚未完成
 
-- 将咨询图本身改为完整 LangGraph 节点，而不是当前预检外壳。
-- 模型规划字段与后端强制字段的结构化合并。
-- Patient Record Text、Patient Fact、Guideline 等工具的动态选择和回放。
-- LOW_CONFIDENCE_INPUT、CREATE_REMINDER 和 ROUTINE_VISIT 的完整 Action Policy。
-- Agent 级工具选择、参数和动作准确率评测集。
+- 将预检图和最终证据图合并成支持中途挂起/恢复的单一持久化 LangGraph。
+- FastModel 已使用冻结集完成一次线上兼容性验收；其超时/异常必须降级到规则路径。详见 `docs/evidence/INTENT_ROUTER_ACCEPTANCE_20260730.md`。
+- Patient Tool 已支持白名单规则动态选择和受约束 LLM fallback；仍缺统一的跨公共/患者工具回放协议。

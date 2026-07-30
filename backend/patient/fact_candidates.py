@@ -17,6 +17,7 @@ from backend.db.models import (
     PatientFact,
     PatientFactCandidate,
 )
+from backend.medical_nlp.safety import redact_sensitive_text
 from backend.patient.facts import FHIR_LIKE_RESOURCE_TYPES, create_patient_fact
 from backend.patient.scope import PatientScope
 from backend.patient.time import utc_naive
@@ -274,7 +275,8 @@ def extract_candidates_for_document(
         if not consent_external_processing:
             raise ValueError("Explicit consent is required before sending private text to the configured LLM")
         try:
-            raw_items = _llm_extract(source_text)
+            redacted_source_text, _ = redact_sensitive_text(source_text)
+            raw_items = _llm_extract(redacted_source_text)
             method = "llm"
         except Exception as exc:
             warning = f"LLM extraction unavailable; local rules used: {str(exc)[:180]}"

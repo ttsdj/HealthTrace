@@ -1,23 +1,27 @@
+from contextvars import ContextVar
+
 from langchain_core.tools import tool
 
 from backend.chat.rag_context import record_rag_context
 from backend.kg import search_medical_kg_text
 from backend.tools.medical_retrieval import format_evidence_bundle, retrieve_public_medical_evidence
 
-_KNOWLEDGE_TOOL_CALLS_THIS_TURN = 0
+_KNOWLEDGE_TOOL_CALLS_THIS_TURN: ContextVar[int] = ContextVar(
+    "healthtrace_knowledge_tool_calls_this_turn",
+    default=0,
+)
 
 
 def reset_knowledge_tool_calls() -> None:
     """每轮对话开始时重置知识库工具调用计数。"""
-    global _KNOWLEDGE_TOOL_CALLS_THIS_TURN
-    _KNOWLEDGE_TOOL_CALLS_THIS_TURN = 0
+    _KNOWLEDGE_TOOL_CALLS_THIS_TURN.set(0)
 
 
 def _try_acquire_knowledge_tool_call() -> bool:
-    global _KNOWLEDGE_TOOL_CALLS_THIS_TURN
-    if _KNOWLEDGE_TOOL_CALLS_THIS_TURN >= 1:
+    calls = _KNOWLEDGE_TOOL_CALLS_THIS_TURN.get()
+    if calls >= 1:
         return False
-    _KNOWLEDGE_TOOL_CALLS_THIS_TURN += 1
+    _KNOWLEDGE_TOOL_CALLS_THIS_TURN.set(calls + 1)
     return True
 
 

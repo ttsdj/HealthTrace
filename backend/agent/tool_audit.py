@@ -45,6 +45,7 @@ def record_tool_call(
     status: str,
     latency_ms: int,
     error_type: str = "",
+    retry_delay_ms: int = 0,
 ) -> None:
     audit = list(_AUDIT.get() or [])
     sanitized, digest = audit_arguments(arguments)
@@ -57,6 +58,7 @@ def record_tool_call(
             "status": status,
             "latency_ms": latency_ms,
             "error_type": error_type,
+            "retry_delay_ms": retry_delay_ms,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )

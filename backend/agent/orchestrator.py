@@ -35,12 +35,15 @@ def _classify_and_plan(state: HealthAgentState) -> dict:
         ),
         "plan": plan,
         "intent": plan.intent,
+        "intent_route": plan.route.model_dump() if plan.route else {},
+        "execution_plan": plan.execution_plan,
         "risk_level": plan.risk_level,
         "required_patient_fields": plan.required_patient_fields,
         "missing_fields": plan.missing_fields,
         "required_evidence_sources": plan.required_evidence_sources,
         "evidence_state": plan.evidence_state.value,
         "action": plan.action.value,
+        "requested_action": plan.action.value,
         "action_reason": plan.action_reason,
     }
 
@@ -94,7 +97,19 @@ def _retrieve_and_grade(state: HealthAgentState) -> dict:
     trace = dict(state.get("rag_trace") or {})
     trace.setdefault("high_risk_medical", state.get("evidence_state") == EvidenceState.HIGH_RISK.value)
     trace.setdefault("missing_fields", state.get("missing_fields") or [])
-    graded = finalize_evidence_state(trace)
+    planned_state = EvidenceState(state.get("evidence_state", EvidenceState.PARTIAL.value))
+    if state.get("guarded_response") and planned_state in {
+        EvidenceState.HIGH_RISK,
+        EvidenceState.PATIENT_DATA_MISSING,
+        EvidenceState.LOW_CONFIDENCE_INPUT,
+    }:
+        graded = {
+            **trace,
+            "evidence_state": planned_state.value,
+            "action": state.get("requested_action") or state.get("action"),
+        }
+    else:
+        graded = finalize_evidence_state(trace)
     failure = state.get("fallback_error") or graded.get("retrieval_failure_reason") or ""
     return {
         **_transition(
@@ -123,9 +138,20 @@ def _decide_action(state: HealthAgentState) -> dict:
     elif evidence_state == EvidenceState.CONFLICTING:
         action = AgentAction.ANSWER
         reason = "answer_with_explicit_evidence_conflict"
+    elif evidence_state == EvidenceState.LOW_CONFIDENCE_INPUT:
+        action = AgentAction.ASK
+        reason = "input_or_route_confidence_too_low"
     else:
-        action = AgentAction.ANSWER
-        reason = "evidence_policy_allows_bounded_answer"
+        requested = state.get("requested_action")
+        if requested in {
+            AgentAction.CREATE_REMINDER.value,
+            AgentAction.RECOMMEND_ROUTINE_VISIT.value,
+        }:
+            action = AgentAction(requested)
+            reason = "planner_requested_safe_action"
+        else:
+            action = AgentAction.ANSWER
+            reason = "evidence_policy_allows_bounded_answer"
     return {
         **_transition(ConsultationStage.DECIDE_ACTION, action=action.value, reason=reason),
         "action": action.value,
@@ -156,6 +182,14 @@ def _execute_policy(state: HealthAgentState) -> dict:
             "不能直接用于自行诊断或调整药物。\n\n" + response
         )
         policy = "conflict_disclosure"
+    elif action == AgentAction.CREATE_REMINDER:
+        response = (
+            "我可以为你创建提醒草稿，但不会直接启用。请确认提醒时间、频率和内容后再执行。"
+        )
+        policy = "confirmation_required_task_draft"
+    elif action == AgentAction.RECOMMEND_ROUTINE_VISIT:
+        response = response or "建议预约相应专科或全科门诊进行常规评估；如出现急症信号请立即急诊就医。"
+        policy = "routine_visit_recommendation"
     elif not response:
         response = "本轮未能生成可靠回答，请稍后重试；若症状紧急，请立即线下就医。"
         policy = "empty_response_guard"
@@ -238,6 +272,8 @@ def finalize_consultation(
             "consultation_stage": completed["current_stage"],
             "consultation_transitions": completed.get("transition_trace") or [],
             "intent": completed.get("intent", "unknown"),
+            "intent_route": completed.get("intent_route") or {},
+            "execution_plan": completed.get("execution_plan") or {},
             "risk_level": completed.get("risk_level", "normal"),
             "required_patient_fields": completed.get("required_patient_fields") or [],
             "missing_fields": completed.get("missing_fields") or [],

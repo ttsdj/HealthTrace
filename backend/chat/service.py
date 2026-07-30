@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, Sys
 
 from backend.agent.orchestrator import finalize_consultation, prepare_consultation
 from backend.agent.tool_audit import get_tool_audit, reset_tool_audit
+from backend.agent.executor import PlannerExecutor
 from backend.care_navigation.context import LocationContext, use_location_context
 from backend.care_navigation.triage import assess_care_navigation_need
 from backend.chat.runtime import agent, fast_model
@@ -295,7 +296,7 @@ def chat_with_agent(
     context_messages = _build_context_messages(
         messages,
         persistent_note,
-        user_text,
+        redacted_user_text,
         memory_note,
         location_context,
     )
@@ -307,7 +308,9 @@ def chat_with_agent(
         result = {"output": guarded_response, "preflight_guarded": True}
     else:
         try:
-            with use_location_context(location_context):
+            with use_location_context(location_context), PlannerExecutor(
+                consultation_state.get("execution_plan") or {}
+            ).activate():
                 result = agent.invoke(
                     {"messages": context_messages},
                     config={"recursion_limit": 8},
@@ -316,7 +319,10 @@ def chat_with_agent(
             print(f"Agent invocation fallback activated: {exc!r}")
             fallback_error = str(exc)
             result = {
-                "output": _safe_degraded_medical_response(user_text, _friendly_model_error(exc)),
+                "output": _safe_degraded_medical_response(
+                    redacted_user_text,
+                    _friendly_model_error(exc),
+                ),
                 "fallback_error": str(exc),
             }
 
@@ -336,7 +342,7 @@ def chat_with_agent(
 
     if not (response_content or "").strip():
         response_content = _safe_degraded_medical_response(
-            user_text,
+            redacted_user_text,
             "agent returned an empty response",
         )
 
@@ -367,7 +373,7 @@ def chat_with_agent(
 
     save_meta = dict(metadata)
     if is_first_message:
-        save_meta["title"] = _generate_session_title_sync(user_text)
+        save_meta["title"] = _generate_session_title_sync(redacted_user_text)
     save_meta["persistent_note"] = _update_persistent_note_sync(
         persistent_note, redacted_user_text, response_content
     )
@@ -454,7 +460,7 @@ async def chat_with_agent_stream(
     context_messages = _build_context_messages(
         messages,
         persistent_note,
-        user_text,
+        redacted_user_text,
         memory_note,
         location_context,
     )
@@ -473,7 +479,7 @@ async def chat_with_agent_stream(
             except Exception as e:
                 print(f"Title task error: {e}")
 
-        title_task = asyncio.create_task(generate_session_title(user_text))
+        title_task = asyncio.create_task(generate_session_title(redacted_user_text))
         title_task.add_done_callback(_on_title_done)
 
     full_response = ""
@@ -486,7 +492,9 @@ async def chat_with_agent_stream(
                 full_response = guarded_response
                 await output_queue.put({"type": "content", "content": guarded_response})
                 return
-            with use_location_context(location_context):
+            with use_location_context(location_context), PlannerExecutor(
+                consultation_state.get("execution_plan") or {}
+            ).activate():
                 async for msg, _metadata in agent.astream(
                     {"messages": context_messages},
                     stream_mode="messages",
@@ -517,7 +525,9 @@ async def chat_with_agent_stream(
                     loop = asyncio.get_running_loop()
 
                     def _invoke_sync():
-                        with use_location_context(location_context):
+                        with use_location_context(location_context), PlannerExecutor(
+                            consultation_state.get("execution_plan") or {}
+                        ).activate():
                             return agent.invoke(
                                 {"messages": context_messages},
                                 config={"recursion_limit": 8},

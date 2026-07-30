@@ -11,14 +11,19 @@ from backend.env import PROJECT_ROOT, load_env
 
 load_env()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from backend.api import router
 from backend.infra.database import init_db
 from backend.jobs.worker import start_background_job_worker, stop_background_job_worker
-from backend.security.middleware import audit_request_middleware
+from backend.security.middleware import (
+    audit_request_middleware,
+    configure_database_bulkhead,
+)
 from backend.observability.telemetry import configure_telemetry
 from backend.tasks.scheduler import start_health_task_scheduler, stop_health_task_scheduler
 
@@ -27,6 +32,15 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend" / "dist"
 
 def create_app() -> FastAPI:
     app = FastAPI(title="HealthTrace Health Consultation API")
+    configure_database_bulkhead(app)
+
+    @app.exception_handler(SQLAlchemyTimeoutError)
+    async def _database_pool_timeout(_: Request, __: SQLAlchemyTimeoutError):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "database is temporarily unavailable"},
+            headers={"Retry-After": "1"},
+        )
 
     @app.on_event("startup")
     async def _startup_init_db():

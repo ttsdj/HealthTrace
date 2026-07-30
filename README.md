@@ -42,7 +42,7 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - tenant 成员与患者授权分开管理；私密扩展字段使用 AES-256-GCM 信封加密，访问仅记录元数据审计，不记录对话或病历正文。
 - 公共知识和患者病历分别进入独立 Milvus collection，患者原文件按 tenant/patient/document 分域。
 - 患者文档先生成待审核候选事实；只有用户确认后才写入 FHIR-like 事实与临床时间轴。
-- 文档解析、患者文档索引和正式评测进入 PostgreSQL 持久任务队列，支持并发领取、幂等、指数退避和故障恢复。
+- 公共文档解析/删除、患者文档索引和 Agent 策略评测进入 PostgreSQL 持久任务队列，支持并发领取、幂等、指数退避和故障恢复；RAGCare、RAGAS 和 MIRAGE 正式实验仍由 CLI 执行。
 - 长期任务先创建待确认草稿；确认后由 PostgreSQL 持久任务系统入队、领取、执行、退避重试，并生成站内通知。
 - 邮件/Webhook 采用站内通知先提交、外部通道后投递；必须显式同意，失败独立重试且不回滚任务。
 - 管理员可查看不含对话正文和患者标识的聚合可观测指标。
@@ -67,7 +67,7 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - Golden set 导入、双人独立审核、临床审核门禁与批准版本导出；当前内置 42 条仍处于待人工审核状态。
 - Prometheus 指标、可选 OpenTelemetry、运行告警、liveness/readiness、容器构建与 GHCR 发布工作流。
 - 42 条 Health Agent 策略集覆盖高风险、缺信息、证据源、工具路由、隐私和边界，当前 42/42 通过。
-- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；当前仓库测试为 98 项通过。
+- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；精确实验数字及其可复现状态见指标审计。
 
 尚未完成、不得对外宣称已实现：
 
@@ -75,7 +75,9 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - 临床人员批准的 Agent 安全集与患者 Observation 趋势 golden set；当前只完成审核工作流，不能把待审核用例称为临床 golden set。
 - 多模态向量、Any-to-Any 检索和临床级医学影像理解。
 
-详细证据见 `docs/CURRENT_IMPLEMENTATION_AUDIT.md` 和 `docs/METRIC_REPRODUCIBILITY_AUDIT.md`。
+详细证据见 [`docs/CURRENT_IMPLEMENTATION_AUDIT.md`](docs/CURRENT_IMPLEMENTATION_AUDIT.md)、
+[`docs/METRIC_REPRODUCIBILITY_AUDIT.md`](docs/METRIC_REPRODUCIBILITY_AUDIT.md) 和
+[`docs/RESUME_CLAIM_AUDIT.md`](docs/RESUME_CLAIM_AUDIT.md)。
 
 ## 架构
 

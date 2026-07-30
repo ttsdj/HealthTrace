@@ -1,10 +1,14 @@
 """单轮对话内 RAG trace 暂存（工具执行 → 流式结束后写入会话）。"""
 
+from contextvars import ContextVar
 from typing import Optional
 
 from backend.rag.conflict import detect_kg_vector_conflict
 
-_LAST_RAG_CONTEXT: Optional[dict] = None
+_LAST_RAG_CONTEXT: ContextVar[Optional[dict]] = ContextVar(
+    "healthtrace_last_rag_context",
+    default=None,
+)
 
 
 def _merge_trace(previous: dict, incoming: dict) -> dict:
@@ -55,21 +59,20 @@ def _merge_trace(previous: dict, incoming: dict) -> dict:
 
 def get_last_rag_context(clear: bool = True) -> Optional[dict]:
     """获取最近一次 RAG 检索上下文，默认读取后清空。"""
-    global _LAST_RAG_CONTEXT
-    context = _LAST_RAG_CONTEXT
+    context = _LAST_RAG_CONTEXT.get()
     if clear:
-        _LAST_RAG_CONTEXT = None
+        _LAST_RAG_CONTEXT.set(None)
     return context
 
 
 def record_rag_context(rag_trace: dict) -> None:
     if rag_trace:
-        global _LAST_RAG_CONTEXT
-        previous = (_LAST_RAG_CONTEXT or {}).get("rag_trace")
+        current = _LAST_RAG_CONTEXT.get()
+        previous = (current or {}).get("rag_trace")
         if previous:
             rag_trace = _merge_trace(previous, rag_trace)
         elif rag_trace.get("tool_name") == "search_medical_kg":
             rag_trace = {**rag_trace, "kg_trace": rag_trace}
         elif rag_trace.get("tool_name") == "search_knowledge_base":
             rag_trace = {**rag_trace, "vector_trace": rag_trace}
-        _LAST_RAG_CONTEXT = {"rag_trace": rag_trace}
+        _LAST_RAG_CONTEXT.set({"rag_trace": rag_trace})

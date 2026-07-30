@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 
@@ -5,6 +6,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_openai import ChatOpenAI
 
 from backend.agent.tool_audit import record_tool_call
+from backend.agent.resilience import ToolBulkheadRejected, invoke_with_resilience
+from backend.agent.tool_registry import tool_is_allowed
 
 from backend.tools import (
     get_current_weather,
@@ -91,14 +94,6 @@ class SimpleAgent:
         self.tools = TOOL_BY_NAME
         self.system_prompt = system_prompt
 
-    @staticmethod
-    def _is_transient(error: Exception) -> bool:
-        message = str(error).lower()
-        return any(
-            marker in message
-            for marker in ("timeout", "timed out", "connection", "429", "502", "503", "504")
-        )
-
     def _invoke_tool(self, name: str, tool, arguments: dict) -> str:
         if tool is None:
             record_tool_call(
@@ -110,34 +105,51 @@ class SimpleAgent:
                 error_type="ToolNotFound",
             )
             return f"Tool '{name}' not found."
+        if not tool_is_allowed(name):
+            record_tool_call(
+                tool_name=name,
+                arguments=arguments,
+                attempt=1,
+                status="denied_by_execution_plan",
+                latency_ms=0,
+                error_type="ToolPolicyDenied",
+            )
+            return "TOOL_POLICY_DENIED: this tool is not permitted by the Planner execution plan."
 
-        max_attempts = 2
-        for attempt in range(1, max_attempts + 1):
-            started = time.perf_counter()
-            try:
-                observation = str(tool.invoke(arguments))
-                record_tool_call(
-                    tool_name=name,
-                    arguments=arguments,
-                    attempt=attempt,
-                    status="ok",
-                    latency_ms=round((time.perf_counter() - started) * 1000),
+        started = time.perf_counter()
+
+        def audit(status, event):
+            record_tool_call(
+                tool_name=name,
+                arguments=arguments,
+                attempt=event.attempt,
+                status=status,
+                latency_ms=round((time.perf_counter() - started) * 1000),
+                error_type=event.error_type,
+                retry_delay_ms=event.retry_delay_ms,
+            )
+
+        try:
+            return str(
+                invoke_with_resilience(
+                    name,
+                    lambda: str(tool.invoke(arguments)),
+                    on_event=audit,
                 )
-                return observation
-            except Exception as exc:
-                transient = self._is_transient(exc)
-                record_tool_call(
-                    tool_name=name,
-                    arguments=arguments,
-                    attempt=attempt,
-                    status="retryable_error" if transient and attempt < max_attempts else "failed",
-                    latency_ms=round((time.perf_counter() - started) * 1000),
-                    error_type=type(exc).__name__,
-                )
-                if not transient or attempt >= max_attempts:
-                    return f"工具调用失败：{type(exc).__name__}"
-                time.sleep(0.05 * attempt)
-        return "工具调用失败：unknown"
+            )
+        except ToolBulkheadRejected as exc:
+            record_tool_call(
+                tool_name=name,
+                arguments=arguments,
+                attempt=1,
+                status="bulkhead_rejected",
+                latency_ms=round((time.perf_counter() - started) * 1000),
+                error_type=type(exc).__name__,
+            )
+            return "TOOL_BULKHEAD_REJECTED: tool capacity is temporarily exhausted."
+        except Exception as exc:
+            # invoke_with_resilience has already recorded the terminal attempt.
+            return f"工具调用失败：{type(exc).__name__}"
 
     def invoke(self, input_data: dict, config: dict = None) -> dict:
         messages = input_data.get("messages", [])
@@ -221,7 +233,11 @@ class SimpleAgent:
             full_messages.append(gathered)
             for tc in tc_list:
                 tool = self.tools.get(tc["name"])
-                obs = self._invoke_tool(tc["name"], tool, tc["args"])
+                # Tool invocation is synchronous for most SDKs.  Keep the SSE
+                # event loop available while retries/backoff happen in a worker.
+                obs = await asyncio.to_thread(
+                    self._invoke_tool, tc["name"], tool, tc["args"]
+                )
                 tc_id = tc.get("id", "")
                 full_messages.append(ToolMessage(content=obs, tool_call_id=tc_id if tc_id else None))
 

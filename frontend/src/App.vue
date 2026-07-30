@@ -50,16 +50,23 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue';
 import Sidebar from '@/components/Sidebar.vue';
 import AuthPanel from '@/components/AuthPanelClinical.vue';
 import HistorySidebar from '@/components/HistorySidebar.vue';
 import WorkspaceHeader from '@/components/WorkspaceHeader.vue';
 import RetrievalPanel from '@/components/RetrievalPanelClinical.vue';
 import ChatArea from '@/components/Chat/ChatArea.vue';
-import DocumentSettings from '@/components/Documents/DocumentSettings.vue';
-import HealthRecordWorkspace from '@/components/HealthRecord/HealthRecordWorkspace.vue';
-import ObservabilityWorkspace from '@/components/Observability/ObservabilityWorkspace.vue';
+
+const DocumentSettings = defineAsyncComponent(
+  () => import('@/components/Documents/DocumentSettings.vue'),
+);
+const HealthRecordWorkspace = defineAsyncComponent(
+  () => import('@/components/HealthRecord/HealthRecordWorkspace.vue'),
+);
+const ObservabilityWorkspace = defineAsyncComponent(
+  () => import('@/components/Observability/ObservabilityWorkspace.vue'),
+);
 
 import { useAuthStore } from '@/stores/auth';
 import { useChatStore } from '@/stores/chat';

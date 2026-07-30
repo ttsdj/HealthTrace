@@ -7,10 +7,34 @@ DATABASE_URL = os.getenv(
     "postgresql+psycopg2://postgres:postgres@localhost:5432/healthtrace",
 )
 
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-)
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    try:
+        return max(0.001, float(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+_ENGINE_OPTIONS = {"pool_pre_ping": True}
+if not DATABASE_URL.startswith("sqlite"):
+    # Keep capacity explicit and bounded.  API-level admission control reserves
+    # connections for jobs and recovery paths instead of allowing requests to
+    # wait indefinitely in SQLAlchemy's implicit pool defaults.
+    _ENGINE_OPTIONS.update(
+        pool_size=_positive_int_env("HEALTHTRACE_DB_POOL_SIZE", 20),
+        max_overflow=_positive_int_env("HEALTHTRACE_DB_MAX_OVERFLOW", 5),
+        pool_timeout=_positive_float_env("HEALTHTRACE_DB_POOL_TIMEOUT_SECONDS", 2.0),
+        pool_recycle=_positive_int_env("HEALTHTRACE_DB_POOL_RECYCLE_SECONDS", 1800),
+    )
+
+engine = create_engine(DATABASE_URL, **_ENGINE_OPTIONS)
 
 
 import re

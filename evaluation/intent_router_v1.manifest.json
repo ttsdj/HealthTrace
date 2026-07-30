@@ -1,0 +1,19 @@
+{
+  "dataset_id": "healthtrace-intent-router-v1",
+  "dataset_sha256": "6516c980adf9687eb435eec539a61d65652ed3fc6c6039e472a5bae21657acae",
+  "case_count": 100,
+  "frozen_on": "2026-07-30",
+  "strata": {
+    "urgent_care": 10,
+    "symptom_assessment": 10,
+    "medication_safety": 10,
+    "report_interpretation": 10,
+    "patient_record_query": 10,
+    "timeline_trend": 10,
+    "lifestyle_guidance": 10,
+    "care_navigation": 10,
+    "health_task": 10,
+    "general_medical_qa": 10
+  },
+  "policy": "Synthetic, de-identified queries only. Prompt few-shot examples may not reuse frozen queries."
+}

@@ -1,6 +1,7 @@
 from backend.agent import orchestrator
 from backend.agent.orchestrator import finalize_consultation, prepare_consultation
 from backend.agent.planner import ConsultationPlan
+from backend.agent.intent_router import Intent, IntentRoute
 from backend.agent.state import AgentAction, ConsultationStage, EvidenceState
 from backend.agent.tool_audit import get_tool_audit, record_tool_call, reset_tool_audit
 
@@ -79,3 +80,55 @@ def test_tool_audit_redacts_secret_fields_and_records_failure_type():
     assert audit[0]["arguments"]["longitude"] == "[REDACTED]"
     assert audit[0]["error_type"] == "TimeoutError"
     assert len(audit[0]["arguments_sha256"]) == 64
+
+
+def test_all_evidence_states_map_to_the_six_declared_actions():
+    expected = {
+        EvidenceState.HIGH_RISK: AgentAction.ESCALATE_URGENT,
+        EvidenceState.PATIENT_DATA_MISSING: AgentAction.ASK,
+        EvidenceState.NO_EVIDENCE: AgentAction.REFUSE,
+        EvidenceState.LOW_CONFIDENCE_INPUT: AgentAction.ASK,
+        EvidenceState.CONFLICTING: AgentAction.ANSWER,
+        EvidenceState.SUFFICIENT: AgentAction.ANSWER,
+        EvidenceState.PARTIAL: AgentAction.ANSWER,
+    }
+    for evidence_state, action in expected.items():
+        outcome = orchestrator._decide_action({"evidence_state": evidence_state.value})
+        assert outcome["action"] == action.value
+
+    reminder = orchestrator._decide_action(
+        {
+            "evidence_state": EvidenceState.PARTIAL.value,
+            "requested_action": AgentAction.CREATE_REMINDER.value,
+        }
+    )
+    routine_visit = orchestrator._decide_action(
+        {
+            "evidence_state": EvidenceState.PARTIAL.value,
+            "requested_action": AgentAction.RECOMMEND_ROUTINE_VISIT.value,
+        }
+    )
+    assert reminder["action"] == AgentAction.CREATE_REMINDER.value
+    assert routine_visit["action"] == AgentAction.RECOMMEND_ROUTINE_VISIT.value
+
+
+def test_low_confidence_route_is_asked_for_clarification(monkeypatch):
+    low_confidence_plan = ConsultationPlan(
+        intent=Intent.GENERAL_MEDICAL_QA.value,
+        risk_level="guarded",
+        route=IntentRoute(
+            primary_intent=Intent.GENERAL_MEDICAL_QA,
+            confidence=0.2,
+            reason_code="test_low_confidence",
+        ),
+        evidence_state=EvidenceState.LOW_CONFIDENCE_INPUT,
+        action=AgentAction.ASK,
+        action_reason="intent_route_low_confidence",
+    )
+    monkeypatch.setattr(orchestrator, "plan_consultation", lambda *_: low_confidence_plan)
+    monkeypatch.setattr(orchestrator, "build_verified_patient_context", lambda *_: ("", {}))
+    prepared = prepare_consultation("alice", "session-1", "请帮我看看")
+    response, trace = finalize_consultation(prepared, {}, "不应直接回答")
+    assert trace["evidence_state"] == EvidenceState.LOW_CONFIDENCE_INPUT.value
+    assert trace["action"] == AgentAction.ASK.value
+    assert "补充" in response

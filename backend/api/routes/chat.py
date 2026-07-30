@@ -3,6 +3,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from backend.chat import chat_with_agent, chat_with_agent_stream
 from backend.db.models import User
@@ -21,7 +22,11 @@ async def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_c
             if request.location is not None
             else None
         )
-        resp = chat_with_agent(
+        # The consultation runtime is synchronous and may call an LLM, vector
+        # store and database. Keep it off the ASGI event loop so SSE, liveness
+        # and unrelated requests remain schedulable under chat load.
+        resp = await run_in_threadpool(
+            chat_with_agent,
             request.message,
             current_user.username,
             session_id,

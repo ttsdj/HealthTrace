@@ -1,4 +1,5 @@
 from backend.chat import service
+from langchain_core.messages import HumanMessage
 
 
 class StubStorage:
@@ -52,3 +53,47 @@ def test_high_risk_preflight_bypasses_llm_and_returns_urgent_action(monkeypatch)
     assert result["rag_trace"]["patient_context_accessed"] is False
     assert result["rag_trace"]["reason"] == "preflight_guarded"
     assert len(storage.saved) >= 2
+
+
+def test_sensitive_text_is_redacted_before_agent_and_title_llm(monkeypatch):
+    storage = StubStorage()
+    captured = {}
+    monkeypatch.setattr(service, "storage", storage)
+    monkeypatch.setattr(service.memory_service, "retrieve", lambda *args, **kwargs: {})
+    monkeypatch.setattr(service.memory_service, "format_for_prompt", lambda memories: "")
+    monkeypatch.setattr(service.memory_service, "store_turn", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "get_last_rag_context", lambda clear=False: None)
+    monkeypatch.setattr(service, "_update_persistent_note_sync", lambda *args: "")
+    monkeypatch.setattr(
+        "backend.agent.orchestrator.build_verified_patient_context",
+        lambda *args: ("", {"patient_context_accessed": False, "reason": "test"}),
+    )
+
+    def capture_agent(input_data, config=None):
+        captured["agent_messages"] = input_data["messages"]
+        return {"output": "已收到"}
+
+    def capture_title(text):
+        captured["title_text"] = text
+        return "隐私测试"
+
+    monkeypatch.setattr(service.agent, "invoke", capture_agent)
+    monkeypatch.setattr(service, "_generate_session_title_sync", capture_title)
+
+    raw_email = "alice@example.com"
+    result = service.chat_with_agent(
+        f"联系邮箱 {raw_email}，请介绍高血压",
+        user_id="alice",
+        session_id="privacy-1",
+    )
+
+    current_query = next(
+        message.content
+        for message in reversed(captured["agent_messages"])
+        if isinstance(message, HumanMessage)
+    )
+    assert raw_email not in current_query
+    assert "[邮箱]" in current_query
+    assert raw_email not in captured["title_text"]
+    assert "[邮箱]" in captured["title_text"]
+    assert result["rag_trace"]["privacy_redaction_applied"] is True

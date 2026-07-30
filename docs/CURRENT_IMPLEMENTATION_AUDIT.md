@@ -1,6 +1,6 @@
 # HealthTrace 当前实现审计
 
-审计基线：Git tag `medretrieve-v3-baseline`，源提交 `15cab76`。最近更新：2026-07-24。
+审计基线：Git tag `healthtrace-reversible-incremental-v1`，源提交 `ed9d131`。最近更新：2026-07-30。
 
 状态定义：
 
@@ -35,7 +35,7 @@
 | Reranker | PARTIAL | `backend/rag/utils.py` 与本地评测 reranker | 生产链路依赖外部 endpoint/key；未默认启用 |
 | 检索降级 | IMPLEMENTED | `backend/rag/utils.py` | 顺序为 Hybrid → Dense → Sparse → No Evidence |
 | Corrective RAG | IMPLEMENTED | 初检、grader、rewrite、HyDE/Step-back、重试节点 | grader 和重写质量依赖模型配置 |
-| 复杂问题拆分 | IMPLEMENTED | LangGraph `Send` 并行子问题与 synthesis | 尚缺覆盖复杂医学问题的正式 Agent 评测 |
+| 复杂问题拆分 | IMPLEMENTED | LangGraph `Send` 并行子问题与 synthesis | 已增加全局分支舱壁、排队超时、错误隔离和 partial synthesis；尚缺下游取消传播、负载验证和正式复杂医学问题评测 |
 | 三级父子分块 | IMPLEMENTED | `backend/indexing/document_loader.py`、`parent_chunk_store.py` | 默认约 L1=2400、L2=1600、L3=800 字符；不是严格 token 计量 |
 | 父块按阈值恢复 | IMPLEMENTED | `backend/rag/utils.py` | 默认同父命中阈值为 2，仍需数据驱动调参 |
 | MinerU | PARTIAL | `backend/indexing/mineru_parser.py` | 可选 CLI/API token；超时后降级，非所有机器默认可用 |
@@ -44,21 +44,23 @@
 | VLM fallback | NOT_FOUND | 无 VLM 调用实现 | 仅在目标架构中规划 |
 | 多模态向量 | NOT_FOUND | 无视觉 collection 或跨模态 embedding | 4GB GPU 环境下延期 POC |
 | PostgreSQL 数据模型 | IMPLEMENTED | 会话、文档、患者事实、时间轴、目标、任务、授权、审计与 golden review 模型 | 持久任务使用 `SKIP LOCKED`；当前是 FHIR-like schema，不是完整 FHIR Server |
-| 通用持久后台任务 | IMPLEMENTED | `backend/jobs/queue.py`、`worker.py`、`background_jobs` | 文档、患者索引和正式评测具备幂等、并发、退避和 stale recovery；未使用独立分布式队列集群 |
+| 通用持久后台任务 | IMPLEMENTED | `backend/jobs/queue.py`、`worker.py`、`background_jobs` | 文档、患者索引和 Agent 策略评测具备幂等、并发、退避和 stale recovery；RAGCare/RAGAS/MIRAGE 尚未接入，且未使用独立分布式队列集群 |
 | Redis 缓存 | PARTIAL | `backend/infra/cache.py`、父块缓存 | 无完整任务状态、查询缓存治理和缓存一致性审计 |
 | Neo4j 医疗 KG | PARTIAL | `backend/kg/client.py`、`search_medical_kg` | 查询工具已接入；实际图数据完整性取决于外部实例 |
 | 医疗安全规则 | PARTIAL | `backend/medical_nlp/safety.py`、`backend/agent/orchestrator.py` | 高风险、缺失信息、无证据和冲突已进入 Action Policy；规则覆盖仍不是临床决策系统 |
 | PII 脱敏 | PARTIAL | 手机号、身份证、邮箱规则与私密字段 AES-GCM 加密 | 尚无医学 PII NER、全日志二次扫描和集中式 KMS |
 | 冲突提示 | IMPLEMENTED | `backend/rag/conflict.py`、`backend/agent/orchestrator.py` | KG/向量冲突进入统一 `CONFLICTING` Evidence State 并强制披露；医学冲突检测仍以规则为主 |
 | 医院导航 | PARTIAL | `backend/care_navigation/` | 依赖定位授权和外部地图/搜索服务 |
-| RAGCare 评测框架 | IMPLEMENTED | dataset、retrieval、metrics、judge、runner、测试 | 目标仓库不包含原始 420 条和正式结果 |
-| 正式 RAGAS 代码 | IMPLEMENTED | `backend/evaluation/ragas_*`、评测脚本 | 当前目标仓库未发现可复现正式结果 |
+| RAGCare 评测框架 | IMPLEMENTED | dataset、retrieval、metrics、judge、runner、测试 | 本地已下载并处理 420 条；尚无正式 Milvus baseline、逐题排名和 RAGAS 结果 |
+| 正式 RAGAS 代码 | IMPLEMENTED | `backend/evaluation/ragas_*`、评测脚本 | 当前仍未发现可复现正式结果 |
 | 运行时 RAGAS-lite | PARTIAL | `backend/chat/service.py`、`backend/observability/service.py` | 已进入管理员聚合监控；仅启发式信号，不是 RAGAS 模型评审 |
 | 全局可观测性 | IMPLEMENTED | `/observability/summary`、`/alerts`、`/metrics`、`metrics.py`、`telemetry.py` | Prometheus 指标已提供，OTLP 按配置启用；当前没有随仓库部署 Grafana/Collector |
 | Golden 审核门禁 | IMPLEMENTED | `golden_review.py`、`golden_evaluation.py`、`golden_evaluation_*` 表 | 双人独立审核与 clinician 门禁已实现；当前 42 条均为 draft，尚未获得临床批准 |
 | Health Agent 策略评测 | IMPLEMENTED | `evaluation/healthtrace_agent_v1.jsonl`、`scripts/evaluate_healthtrace_agent.py` | 42 条确定性工程用例当前 42/42；不是临床医学答案评测 |
 | Liveness/readiness 与容器发布 | IMPLEMENTED | `/health/live`、`/health/ready`、`Dockerfile`、`container.yml` | 配置和自动化已完成；仍需在目标云平台完成真实发布与恢复演练 |
 | MIRAGE 评测 | IMPLEMENTED | dataset、metrics、runner、CLI 与历史结果摘要 | 原始 7,663 条逐题结果不提交 Git |
+| 请求级运行上下文隔离 | IMPLEMENTED | `rag_context.py`、`streaming.py`、`knowledge.py` 的 `ContextVar` | 已覆盖协程隔离与跨线程传播；仍需真实 SSE 并发和客户端取消压力测试 |
+| 前端按需加载与语法高亮裁剪 | IMPLEMENTED | `App.vue`、`utils/markdown.ts` | 本地生产构建入口 JS 从 1,224.70 kB 降至 280.99 kB；不是网络性能或用户体验压测结果 |
 
 ## 当前真实上下文注入
 
@@ -84,7 +86,7 @@ PostgreSQL 已增加 tenant、patient、document、fact candidate、FHIR-like fa
 
 ## 测试覆盖判断
 
-迁移前基线为 35 项，Phase 0 为 39 项；当前为 98 项通过。新增覆盖六阶段加法迁移、跨患者数据/API 隔离、成员授权与加密、持久任务故障恢复、Golden 审核门禁、八阶段咨询状态机、Agent 策略评测、Observation 趋势、Patient Tool fallback、Prometheus 聚合监控、任务幂等、外部通知同意与独立重试。2026-07-24 已在真实旧 PostgreSQL 上完成 Phase 5/6 迁移，迁移前备份和恢复目录校验通过。
+迁移前基线为 35 项，Phase 0 为 39 项；2026-07-30 在项目内隔离临时目录重新验证为 117 项通过。新增覆盖六阶段加法迁移、跨患者数据/API 隔离、成员授权与加密、持久任务故障恢复、Golden 审核门禁、八阶段咨询状态机、Agent 策略评测、Observation 趋势、Patient Tool fallback、Prometheus 聚合监控、任务幂等、外部通知同意与独立重试，以及请求级 RAG/SSE 上下文隔离、LLM 前脱敏集成和复杂 Send 分支舱壁/错误合成。2026-07-24 已在真实旧 PostgreSQL 上完成 Phase 5/6 迁移，迁移前备份和恢复目录校验通过。
 
 ## 下一步
 

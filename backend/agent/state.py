@@ -42,6 +42,8 @@ class HealthAgentState(TypedDict, total=False):
     current_stage: str
     plan: Any
     intent: str
+    intent_route: dict[str, Any]
+    execution_plan: dict[str, Any]
     risk_level: str
     required_patient_fields: list[str]
     missing_fields: list[str]
@@ -56,5 +58,6 @@ class HealthAgentState(TypedDict, total=False):
     evidence_state: str
     action: str
     action_reason: str
+    requested_action: str
     answer_policy_applied: str
     transition_trace: Annotated[list[dict[str, Any]], operator.add]

@@ -21,12 +21,22 @@ PBKDF2_ROUNDS = int(os.getenv("PASSWORD_PBKDF2_ROUNDS", "310000"))
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
-def get_db():
-    db = SessionLocal()
+def get_db(request: Request):
+    """Yield the request Session when middleware has already created one.
+
+    Audited requests use a single Session for authorization, endpoint work and
+    the final audit record.  This prevents the audit middleware from checking
+    out a second connection while the dependency Session is still held.
+    """
+    db = getattr(request.state, "db_session", None)
+    shared = db is not None
+    if db is None:
+        db = SessionLocal()
     try:
         yield db
     finally:
-        db.close()
+        if not shared:
+            db.close()
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:

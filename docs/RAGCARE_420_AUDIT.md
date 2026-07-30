@@ -4,7 +4,9 @@
 
 状态：`PARTIAL`。
 
-项目已经实现 RAGCare-QA 的下载、标准化、gold 映射、防泄漏、分层切分、四组 baseline 和指标代码，并有单元测试；但 HealthTrace 目标仓库不包含原始数据、处理后数据、Milvus 评测 collection 或正式实验结果。因此目前不能从该仓库直接声称任何 RAGCare Recall@5 或 RAGAS 分数。
+项目已经实现 RAGCare-QA 的下载、标准化、gold 映射、防泄漏、分层切分、四组 baseline 和指标代码，并有单元测试。2026-07-28 已在本地下载并处理 420 条数据；`manifest.json` 记录 407 个 corpus documents、2,615 个 leaf chunks、100 条 pilot 和 320 条 held-out。数据受 `.gitignore` 保护，不随仓库发布。
+
+当前仍不存在正式 Milvus 评测 collection、逐题排名、baseline summary 或正式 RAGAS 输出。因此目前不能声称任何 RAGCare Recall@5、MRR 或 RAGAS 分数。
 
 ## 数据来源与规模
 

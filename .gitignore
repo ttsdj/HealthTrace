@@ -21,6 +21,7 @@ wheels/
 
 # Python
 .pytest_cache/
+.tmp/
 *.pyc
 *.ipynb
 

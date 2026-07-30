@@ -150,7 +150,7 @@ def test_llm_extraction_requires_consent_and_falls_back_to_rules(tmp_path, monke
             db,
             "alice",
             "doc-alice",
-            "2026-07-20\n当前用药：二甲双胍 500mg",
+            "2026-07-20\n邮箱：alice@example.com\n当前用药：二甲双胍 500mg",
         )
         db.commit()
 
@@ -163,11 +163,13 @@ def test_llm_extraction_requires_consent_and_falls_back_to_rules(tmp_path, monke
                 consent_external_processing=False,
             )
 
-        monkeypatch.setattr(
-            candidate_module,
-            "_llm_extract",
-            lambda text: (_ for _ in ()).throw(RuntimeError("synthetic model outage")),
-        )
+        llm_inputs = []
+
+        def unavailable_llm(text):
+            llm_inputs.append(text)
+            raise RuntimeError("synthetic model outage")
+
+        monkeypatch.setattr(candidate_module, "_llm_extract", unavailable_llm)
         candidates, method, warning = extract_candidates_for_document(
             db,
             scope,
@@ -178,4 +180,6 @@ def test_llm_extraction_requires_consent_and_falls_back_to_rules(tmp_path, monke
 
     assert method == "local_rules_fallback"
     assert "synthetic model outage" in warning
+    assert "alice@example.com" not in llm_inputs[0]
+    assert "[邮箱]" in llm_inputs[0]
     assert [item.resource_type for item in candidates] == ["MedicationStatement"]

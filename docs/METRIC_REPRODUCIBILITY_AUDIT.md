@@ -9,8 +9,8 @@
 ### 代码测试
 
 - 状态：`VERIFIED`
-- 当前结果：39 passed（迁移前 35 项，Phase 0 新增 4 项）
-- 命令：`.venv\Scripts\python.exe -m pytest -q`
+- 当前结果：117 passed（本轮升级前基线为 111）
+- 命令：`.venv\Scripts\python.exe -m pytest -q --basetemp <isolated-project-temp>`
 - 含义：证明当前测试覆盖的模块行为通过，不代表临床效果或全链路生产可用。
 
 ### MIRAGE LLM-only
@@ -43,7 +43,7 @@
 
 | 指标 | 状态 | 原因 |
 |---|---|---|
-| RAGCare Recall@5 / MRR | NOT_REPRODUCIBLE_HERE | 目标仓库无原始 420 条和正式逐题结果 |
+| RAGCare Recall@5 / MRR | NOT_REPRODUCIBLE_HERE | 本地已有原始/处理后 420 条，但无正式逐题检索结果 |
 | 正式 RAGAS 三项分数 | NOT_REPRODUCIBLE_HERE | 目标仓库无对应实验输出 |
 | 运行时 ragas_lite | HEURISTIC_ONLY | 由召回数量、回答长度和降级状态计算，不是 RAGAS |
 | 复杂回答延迟下降 21.97% | UNVERIFIED | 当前未发现完整前后配置和原始 latency 结果 |
