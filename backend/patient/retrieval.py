@@ -23,6 +23,8 @@ def retrieve_patient_records(
     query: str,
     scope: PatientScope,
     top_k: int = 5,
+    *,
+    candidate_document_ids: list[str] | None = None,
 ) -> dict:
     """Retrieve private evidence with mandatory server-derived scope filters."""
     from backend.indexing.embedding import embedding_service
@@ -30,6 +32,9 @@ def retrieve_patient_records(
 
     store = get_milvus_store("patient_record")
     filter_expr = patient_scope_filter(scope)
+    if candidate_document_ids:
+        quoted_ids = ", ".join(f'"{d}"' for d in candidate_document_ids)
+        filter_expr = f"{filter_expr} and document_id in [{quoted_ids}]"
     attempts: list[dict] = []
     dense: list[float] | None = None
     try:

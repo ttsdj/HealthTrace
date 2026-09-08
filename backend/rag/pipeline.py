@@ -147,6 +147,11 @@ class RAGState(TypedDict):
     sub_questions: Optional[List[str]]
     is_sub_agent: bool
     sub_results: Annotated[List[dict], operator.add]
+    # Scope→Topic→Document funnel
+    patient_scope: Optional[object]
+    retrieval_scope: Optional[dict]
+    topic_query: Optional[dict]
+    funnel_trace: Optional[dict]
 
 
 def _format_docs(docs: List[dict]) -> str:
@@ -169,10 +174,54 @@ def _trace_quality_fields(docs: List[dict]) -> dict:
 
 def retrieve_initial(state: RAGState) -> RAGState:
     query = state["question"]
+    patient_scope = state.get("patient_scope")
     emit_rag_step("🔍", "正在检索知识库...", f"查询: {query[:50]}")
-    retrieved = retrieve_documents(query, top_k=5)
-    results = retrieved.get("docs", [])
-    retrieve_meta = retrieved.get("meta", {})
+
+    # Lazy import: funnel -> patient.context -> tools -> medical_retrieval -> pipeline,
+    # which is a cycle if imported at module load time.
+    from backend.rag.funnel import run_funnel
+
+    try:
+        funnel_results, funnel_trace = run_funnel(
+            query,
+            patient_scope=patient_scope,
+            top_k=int(os.getenv("RAG_FUNNEL_TOP_K", "5")),
+        )
+    except Exception as exc:
+        # run_funnel never raises, but stay defensive on the caller side.
+        funnel_results = []
+        funnel_trace = {
+            "scope": {},
+            "topic": {},
+            "document": {},
+            "stages": ["scope", "topic", "document"],
+            "degraded": True,
+            "degraded_stages": ["funnel"],
+            "final_domain": "public",
+            "final_public_fallback": True,
+            "error": str(exc)[:200],
+        }
+    results = funnel_results
+    document_trace = (funnel_trace.get("document", {}) if funnel_trace else {}) or {}
+    retrieve_meta = {}
+    public_meta = next(
+        (
+            sub.get("meta", {}) or {}
+            for sub in document_trace.get("sub_retrievals", [])
+            if isinstance(sub, dict) and sub.get("domain") == "public"
+        ),
+        {},
+    )
+    retrieve_meta.update(public_meta)
+
+    emit_rag_step(
+        "🧭",
+        "Scope→Topic→Document 漏斗检索",
+        (
+            f"domain={funnel_trace.get('final_domain', 'public')}，"
+            f"degraded={bool(funnel_trace.get('degraded'))}"
+        ),
+    )
     prompt_docs, compression_meta = _compress_docs_for_prompt(results, query)
     context = _format_docs(prompt_docs)
     emit_rag_step(
@@ -204,6 +253,9 @@ def retrieve_initial(state: RAGState) -> RAGState:
         "initial_retrieved_chunks": results,
         "compressed_context_chunks": prompt_docs,
         "retrieval_stage": "initial",
+        "retrieval_scope": funnel_trace.get("scope") or None,
+        "topic_query": funnel_trace.get("topic") or None,
+        "funnel_trace": funnel_trace,
         **_trace_quality_fields(results),
         **compression_meta,
         **retrieval_trace_fields(retrieve_meta),
@@ -213,6 +265,9 @@ def retrieve_initial(state: RAGState) -> RAGState:
         "docs": results,
         "context": context,
         "rag_trace": rag_trace,
+        "retrieval_scope": funnel_trace.get("scope") or None,
+        "topic_query": funnel_trace.get("topic") or None,
+        "funnel_trace": funnel_trace,
     }
 
 
@@ -478,6 +533,7 @@ def _route_after_complexity(state: RAGState):
 def _fanout_sub_questions(state: RAGState):
     """将分解后的子问题通过 Send API 并行分发到 rag_sub_agent 子图。"""
     sub_qs = state.get("sub_questions") or []
+    patient_scope = state.get("patient_scope")
     if not sub_qs:
         # 分解失败，回退到原有流程
         return [Send("retrieve_initial", {
@@ -497,6 +553,10 @@ def _fanout_sub_questions(state: RAGState):
             "sub_questions": None,
             "is_sub_agent": False,
             "sub_results": [],
+            "patient_scope": patient_scope,
+            "retrieval_scope": None,
+            "topic_query": None,
+            "funnel_trace": None,
         })]
     return [
         Send("rag_sub_agent", {
@@ -516,6 +576,10 @@ def _fanout_sub_questions(state: RAGState):
             "sub_questions": None,
             "is_sub_agent": True,
             "sub_results": [],
+            "patient_scope": patient_scope,
+            "retrieval_scope": None,
+            "topic_query": None,
+            "funnel_trace": None,
         })
         for sq in sub_qs
     ]
@@ -737,7 +801,7 @@ def build_rag_graph():
 rag_graph = build_rag_graph()
 
 
-def run_rag_graph(question: str) -> dict:
+def run_rag_graph(question: str, patient_scope=None) -> dict:
     return rag_graph.invoke({
         "question": question,
         "query": question,
@@ -756,4 +820,9 @@ def run_rag_graph(question: str) -> dict:
         "sub_questions": None,
         "is_sub_agent": False,
         "sub_results": [],
+        # Scope→Topic→Document 漏斗
+        "patient_scope": patient_scope,
+        "retrieval_scope": None,
+        "topic_query": None,
+        "funnel_trace": None,
     })

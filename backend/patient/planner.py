@@ -16,6 +16,7 @@ ALLOWED_PATIENT_TOOLS = {
     "get_patient_timeline",
     "search_patient_record_text",
     "get_observation_trend",
+    "search_patient_temporal_graph",
 }
 
 
@@ -69,6 +70,8 @@ def plan_patient_tool_calls_rules(query: str) -> list[PatientToolCall]:
         _add(calls, "search_patient_record_text", "patient_document_query", query=text, top_k=3)
     if any(word in lowered for word in ("时间线", "什么时候", "历次", "就诊记录", "timeline", "history")):
         _add(calls, "get_patient_timeline", "timeline_query", limit=50)
+    if any(word in lowered for word in ("图谱", "时序", "关联", "temporal", "graph")):
+        _add(calls, "search_patient_temporal_graph", "temporal_graph_query", limit=50)
     if not calls and any(word in lowered for word in ("我", "我的", "本人", "my ", "patient")):
         _add(calls, "get_patient_timeline", "generic_personal_context", limit=10)
     return calls[:5]
@@ -92,6 +95,8 @@ def _validate_calls(raw: Any) -> list[PatientToolCall]:
         elif name == "get_observation_trend":
             arguments = {"code": str(arguments.get("code", "observation"))[:100]}
         elif name == "get_patient_timeline":
+            arguments = {"limit": min(max(int(arguments.get("limit", 50)), 1), 100)}
+        elif name == "search_patient_temporal_graph":
             arguments = {"limit": min(max(int(arguments.get("limit", 50)), 1), 100)}
         else:
             arguments = {}

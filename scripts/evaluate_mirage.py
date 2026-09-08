@@ -22,6 +22,14 @@ from backend.evaluation.mirage_dataset import (  # noqa: E402
     resolve_benchmark_path,
     select_cases,
 )
+from backend.evaluation.eval_artifact import (  # noqa: E402
+    build_artifact,
+    capture_command,
+    capture_git_commit,
+    hash_identity,
+    standard_statistical_definitions,
+    write_artifact,
+)
 from backend.evaluation.mirage_runner import (  # noqa: E402
     MIRAGE_PROMPT_VERSION,
     SUPPORTED_MODES,
@@ -95,6 +103,11 @@ def main() -> None:
         help="When resuming, rerun records that previously failed or produced invalid answers.",
     )
     parser.add_argument("--experiment-id", default="")
+    parser.add_argument(
+        "--artifact-out",
+        default="",
+        help="Path to write a uniform reproducible MANIFEST.json. Default: <output_dir>/MANIFEST.json.",
+    )
     args = parser.parse_args()
     if args.rag_collection:
         os.environ["MILVUS_MEDICAL_QA_COLLECTION"] = args.rag_collection
@@ -228,6 +241,24 @@ def main() -> None:
     summary = write_outputs(output_dir, config=run_config, records=records)
     print(f"Wrote MIRAGE outputs to {output_dir}")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+    artifact_path = (
+        Path(args.artifact_out) if args.artifact_out else output_dir / "MANIFEST.json"
+    )
+    try:
+        artifact = build_artifact(
+            dataset_hash=hash_identity(raw_sha256, args.mode, config.model, config.base_url),
+            config=run_config,
+            per_question=[dict(record) for record in records],
+            summary=summary,
+            statistical_definitions=standard_statistical_definitions(),
+            command=capture_command(),
+            commit=capture_git_commit(PROJECT_ROOT),
+        )
+        write_artifact(artifact, artifact_path.parent, artifact_path.name)
+        print(f"Wrote reproducibility artifact to {artifact_path}")
+    except Exception as exc:  # noqa: BLE001 - never break a completed evaluation run.
+        print(f"Warning: could not write reproducibility artifact: {exc}")
 
 
 if __name__ == "__main__":

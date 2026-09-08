@@ -58,6 +58,15 @@
 ```cmd
 .venv\Scripts\python.exe scripts\evaluate_mirage.py --mode llm_only --experiment-id mirage-llm-only
 .venv\Scripts\python.exe scripts\evaluate_mirage.py --mode rag_agent --rag-collection your_pubmed_collection --experiment-id mirage-pubmed-rag
+.venv\Scripts\python.exe scripts\evaluate_ragcare_full.py --mode hybrid --top-k 5 --experiment-id ragcare-hybrid
 ```
 
 正式对比必须保持相同 benchmark、prompt、模型、温度和题目集合，并报告所有 baseline，而不是只报告最好结果。
+
+## 可复现评测工件
+
+仓库已提供统一的可复现评测工件 schema（`backend/evaluation/eval_artifact.py`）与
+`scripts/evaluate_ragcare_full.py`，会产出 `dataset_hash / config / per_query / statistical_definitions /
+command / commit` 的 `MANIFEST.json`。规则：**指标数字只从真实跑数生成的工件读取**；未跑数前，上表
+"当前不可作为简历数字"的各项不动，不得用手填或推算数字代替工件。工件 schema 详见
+`docs/REPRODUCIBLE_EVALUATIONS.md`。

@@ -17,6 +17,7 @@ from time import perf_counter
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
+from backend.medical_nlp import intent_classifier
 from backend.medical_nlp.intent import analyze_medical_query
 from backend.medical_nlp.safety import analyze_medical_safety, redact_sensitive_text
 
@@ -61,6 +62,23 @@ class _ModelRoute(BaseModel):
     requires_write_confirmation: bool = False
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     reason_code: str = "fastmodel"
+
+
+# The LoRA-BERT classifier emits a label string.  We map it to the Intent enum
+# through an explicit alias map so an unknown or stray label is treated as
+# "unavailable" (and the deterministic result kept) rather than crashing.
+LORA_INTENT_ALIASES: dict[str, Intent] = {
+    Intent.URGENT_CARE.value: Intent.URGENT_CARE,
+    Intent.SYMPTOM_ASSESSMENT.value: Intent.SYMPTOM_ASSESSMENT,
+    Intent.MEDICATION_SAFETY.value: Intent.MEDICATION_SAFETY,
+    Intent.REPORT_INTERPRETATION.value: Intent.REPORT_INTERPRETATION,
+    Intent.PATIENT_RECORD_QUERY.value: Intent.PATIENT_RECORD_QUERY,
+    Intent.TIMELINE_TREND.value: Intent.TIMELINE_TREND,
+    Intent.LIFESTYLE_GUIDANCE.value: Intent.LIFESTYLE_GUIDANCE,
+    Intent.CARE_NAVIGATION.value: Intent.CARE_NAVIGATION,
+    Intent.HEALTH_TASK.value: Intent.HEALTH_TASK,
+    Intent.GENERAL_MEDICAL_QA.value: Intent.GENERAL_MEDICAL_QA,
+}
 
 
 _ROUTER_PROMPT = ChatPromptTemplate.from_messages(
@@ -228,6 +246,29 @@ def _fast_model_route(query: str) -> _ModelRoute:
     return _ModelRoute.model_validate(json.loads(match.group(0)))
 
 
+def _lora_route(query: str) -> _ModelRoute | None:
+    """Refine routing with the BERT+LoRA classifier when an adapter is configured.
+
+    Returns ``None`` when the classifier is unavailable (no adapter, no peft,
+    load error, or an unknown label) so the caller keeps the deterministic
+    result.  Never raises.
+    """
+    label_confidence = intent_classifier.classify(query)
+    if label_confidence is None:
+        return None
+    label, confidence = label_confidence
+    mapped = LORA_INTENT_ALIASES.get(label)
+    if mapped is None:
+        return None
+    return _ModelRoute(
+        primary_intent=mapped,
+        complexity="simple",
+        needs_patient_context=False,
+        confidence=float(min(1.0, max(0.0, confidence))),
+        reason_code="lora",
+    )
+
+
 def route_intent(query: str) -> IntentRoute:
     """Route one request, preserving a deterministic safety and fallback path."""
     started = perf_counter()
@@ -247,7 +288,40 @@ def route_intent(query: str) -> IntentRoute:
         Intent.TIMELINE_TREND,
     }
     result = deterministic
-    if mode in {"fastmodel", "auto"} and deterministic.primary_intent not in protected:
+    lora_applied = False  # heavy-lazy local marker; never exported
+
+    # Middle tier: a BERT+LoRA classifier may refine normal requests when an
+    # adapter is configured.  It is modelled exactly like FastModel: only for
+    # non-protected intents, validated against the same contract, and never
+    # allowed to grant write capability.  Any error keeps the deterministic
+    # result.
+    if mode in {"lora", "lora_fastmodel", "auto"} and deterministic.primary_intent not in protected:
+        try:
+            lora_route = _lora_route(redacted)
+            if lora_route is not None:
+                result = IntentRoute(
+                    primary_intent=lora_route.primary_intent,
+                    complexity=lora_route.complexity,
+                    needs_patient_context=lora_route.needs_patient_context,
+                    confidence=lora_route.confidence,
+                    route_source="lora",
+                    reason_code=lora_route.reason_code or "lora",
+                    safety=safety,
+                )
+                # Write capability can never be granted by a model/LoRA guess.
+                result.requires_write_confirmation = False
+                lora_applied = True
+        except Exception:
+            lora_applied = False
+
+    # Top tier: the structured FastModel.  In auto / lora_fastmodel it only runs
+    # when the (lighter) LoRA layer was unavailable, so normal requests go
+    # deterministic -> LoRA -> LLM and only escalate as needed.
+    if (
+        not lora_applied
+        and mode in {"fastmodel", "lora_fastmodel", "auto"}
+        and deterministic.primary_intent not in protected
+    ):
         try:
             model_route = _fast_model_route(redacted)
             result = IntentRoute(

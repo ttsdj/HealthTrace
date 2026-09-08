@@ -23,7 +23,7 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument(
         "--router-mode",
-        choices=("rules", "fastmodel", "auto"),
+        choices=("rules", "fastmodel", "auto", "lora", "lora_fastmodel"),
         help="Override HEALTHTRACE_INTENT_ROUTER_MODE for this isolated evaluation run.",
     )
     args = parser.parse_args()

@@ -6,6 +6,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from backend.db.models import DocumentRecord, PatientFact, PatientTimelineEvent
+from backend.kg.patient_graph import mirror_patient_fact_to_graph
 from backend.patient.scope import PatientScope
 from backend.patient.time import utc_naive
 
@@ -112,6 +113,9 @@ def create_patient_fact(
     )
     db.add(event)
     db.flush()
+    # Best-effort Neo4j mirror: never raises and is a no-op when the patient graph
+    # is disabled. PostgreSQL fact creation is the source of truth and always succeeds.
+    mirror_patient_fact_to_graph(scope, fact, event)
     return fact
 
 

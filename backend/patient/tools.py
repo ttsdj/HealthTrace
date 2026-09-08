@@ -62,6 +62,24 @@ class PatientTools:
             data=data,
         )
 
+    def search_patient_temporal_graph(self, limit: int = 50) -> PatientToolResult:
+        """Read-only longitudinal timeline backed by the optional Neo4j patient graph."""
+        try:
+            from backend.kg.patient_graph import get_patient_graph_client
+
+            rows = get_patient_graph_client().query_patient_timeline(self._scope, limit)
+        except Exception as exc:
+            return PatientToolResult(
+                tool_name="search_patient_temporal_graph",
+                status="capability_unavailable",
+                error=str(exc)[:300],
+            )
+        return PatientToolResult(
+            tool_name="search_patient_temporal_graph",
+            status="ok" if rows else "empty",
+            data=rows,
+        )
+
     def search_patient_record_text(self, query: str, top_k: int = 5) -> PatientToolResult:
         try:
             result = self._record_retriever(query, self._scope, top_k)

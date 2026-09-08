@@ -25,7 +25,9 @@
 | 长期健康任务 | IMPLEMENTED | `health_tasks`、`health_task_runs`、`health_notifications`、scheduler 与 API | 五类任务、确认、持久化入队、领取、退避重试、等待输入、周期摘要和站内通知已实现 |
 | 外部通知 | PARTIAL | `health_notification_deliveries`、`backend/tasks/notifications.py` | 邮件/Webhook 适配、同意门槛、幂等和独立重试已实现；尚未用真实供应商执行验收 |
 | LangGraph RAG 图 | IMPLEMENTED | `backend/rag/pipeline.py` 的 `build_rag_graph` 与子图 | 负责公共证据检索，作为咨询状态机内的检索能力运行 |
+| Scope→Topic→Document 漏斗检索 | IMPLEMENTED | `backend/rag/funnel.py`、`backend/rag/pipeline.py` | 按患者标记选择公共/患者收集域、复用药学主题词收窄、再做文档级候选与叶子块检索；记录 `funnel_trace` 并逐级降级 |
 | 咨询 Orchestrator | IMPLEMENTED | `backend/agent/orchestrator.py`、`chat/service.py` | RECEIVE 到 COMPLETED 的八阶段轨迹、Evidence State、Action Policy、无证据/冲突/高风险策略和动态白名单 Patient Tool 已接入 |
+| 三层意图路由（规则→LoRA-BERT→LLM） | IMPLEMENTED | `backend/medical_nlp/intent_classifier.py`、`backend/agent/intent_router.py` | 规则层确定性优先；LoRA-BERT 为可选层，默认关闭且无 adapter/peft 时自动回退规则；模型层永不授予写能力 |
 | Recent Messages | IMPLEMENTED | `backend/rag/context_compression.py`、`backend/chat/service.py` | 窗口策略较简单 |
 | Persistent Note | PARTIAL | `backend/chat/service.py` 的笔记生成与注入 | LLM 摘要未结构化、无事实可信状态 |
 | 语义/情景记忆 | PARTIAL | `backend/memory/service.py`、两类 Milvus collection | 已强制 tenant/patient 过滤并标记未核验；仍缺过期、确认和撤回流程 |
@@ -47,6 +49,7 @@
 | 通用持久后台任务 | IMPLEMENTED | `backend/jobs/queue.py`、`worker.py`、`background_jobs` | 文档、患者索引和 Agent 策略评测具备幂等、并发、退避和 stale recovery；RAGCare/RAGAS/MIRAGE 尚未接入，且未使用独立分布式队列集群 |
 | Redis 缓存 | PARTIAL | `backend/infra/cache.py`、父块缓存 | 无完整任务状态、查询缓存治理和缓存一致性审计 |
 | Neo4j 医疗 KG | PARTIAL | `backend/kg/client.py`、`search_medical_kg` | 查询工具已接入；实际图数据完整性取决于外部实例 |
+| Neo4j 患者时序健康图谱 | IMPLEMENTED | `backend/kg/patient_graph.py`、`backend/patient/facts.py` | 确认后事实异步镜像到 Patient→资源节点→TimelineEvent 链，按 effective_at 排序；默认关闭，Neo4j 不可用时患者事实入库不受影响 |
 | 医疗安全规则 | PARTIAL | `backend/medical_nlp/safety.py`、`backend/agent/orchestrator.py` | 高风险、缺失信息、无证据和冲突已进入 Action Policy；规则覆盖仍不是临床决策系统 |
 | PII 脱敏 | PARTIAL | 手机号、身份证、邮箱规则与私密字段 AES-GCM 加密 | 尚无医学 PII NER、全日志二次扫描和集中式 KMS |
 | 冲突提示 | IMPLEMENTED | `backend/rag/conflict.py`、`backend/agent/orchestrator.py` | KG/向量冲突进入统一 `CONFLICTING` Evidence State 并强制披露；医学冲突检测仍以规则为主 |

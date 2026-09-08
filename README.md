@@ -67,13 +67,17 @@ HealthTrace 的目标是建立一个可追溯、可降级、可评测的健康�
 - Golden set 导入、双人独立审核、临床审核门禁与批准版本导出；当前内置 42 条仍处于待人工审核状态。
 - Prometheus 指标、可选 OpenTelemetry、运行告警、liveness/readiness、容器构建与 GHCR 发布工作流。
 - 42 条 Health Agent 策略集覆盖高风险、缺信息、证据源、工具路由、隐私和边界，当前 42/42 通过。
-- RAGCare-QA、RAGAS 和 MIRAGE 评测代码；精确实验数字及其可复现状态见指标审计。
+- 三层意图路由（确定性规则 → LoRA-BERT → 结构式 LLM）：LoRA-BERT 层为可选增强，未安装 `peft` 或未训练 adapter 时自动回退到规则层，任何模型层都不能授予写能力。
+- 确认后的患者事实异步镜像到 Neo4j 时序健康图谱（`Patient`→`HAS_CONDITION/OBSERVED/TAKES/…`→`TimelineEvent` 链），支持纵向时间轴与关联查询；Neo4j 为可选增强，默认关闭且不可用时患者事实入库不受影响。
+- Scope→Topic→Document 漏斗检索：按患者标记选择公共/患者收集域，复用药学主题词收窄，再进行文档级候选与叶子块检索，并记录 `funnel_trace`。
+- RAGCare-QA、RAGAS 和 MIRAGE 评测代码，以及统一的可复现评测工件 schema（`dataset_hash/config/per_query/statistical_definitions/command/commit`）；精确实验数字及其可复现状态见指标审计。
 
 尚未完成、不得对外宣称已实现：
 
 - 短信、原生移动推送和外部邮件/Webhook 真实供应商验收。
 - 临床人员批准的 Agent 安全集与患者 Observation 趋势 golden set；当前只完成审核工作流，不能把待审核用例称为临床 golden set。
 - 多模态向量、Any-to-Any 检索和临床级医学影像理解。
+- 指标数字未经真实跑数结果支撑前，不计入"已验证"；正式 RAGCare/RAGAS/MIRAGE 数字需通过 `scripts/evaluate_ragcare_full.py` 等生成工件后回填。
 
 详细证据见 [`docs/CURRENT_IMPLEMENTATION_AUDIT.md`](docs/CURRENT_IMPLEMENTATION_AUDIT.md)、
 [`docs/METRIC_REPRODUCIBILITY_AUDIT.md`](docs/METRIC_REPRODUCIBILITY_AUDIT.md) 和

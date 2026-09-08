@@ -433,9 +433,19 @@ def _finalize_retrieval(
     return {"docs": final_docs, "meta": meta}
 
 
-def retrieve_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
+def retrieve_documents(
+    query: str,
+    top_k: int = 5,
+    *,
+    filter_expr: str = "",
+    candidate_document_ids: list[str] | None = None,
+) -> Dict[str, Any]:
     candidate_k, candidate_config = resolve_candidate_k(top_k)
-    filter_expr = f"chunk_level == {LEAF_RETRIEVE_LEVEL}"
+    target_filter = filter_expr or f"chunk_level == {LEAF_RETRIEVE_LEVEL}"
+    if candidate_document_ids:
+        quoted_ids = ", ".join(f'"{d}"' for d in candidate_document_ids)
+        doc_filter = f"document_id in [{quoted_ids}]"
+        target_filter = f"{target_filter} and {doc_filter}" if target_filter else doc_filter
     attempts: List[dict] = []
     dense_embedding: list[float] | None = None
 
@@ -446,7 +456,7 @@ def retrieve_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
             dense_embedding=dense_embedding,
             query=query,
             top_k=candidate_k,
-            filter_expr=filter_expr,
+            filter_expr=target_filter,
         )
         result = _finalize_retrieval(
             query=query,
@@ -470,7 +480,7 @@ def retrieve_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
         retrieved = _milvus_manager.dense_retrieve(
             dense_embedding=dense_embedding,
             top_k=candidate_k,
-            filter_expr=filter_expr,
+            filter_expr=target_filter,
         )
         result = _finalize_retrieval(
             query=query,
@@ -493,7 +503,7 @@ def retrieve_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
         retrieved = _milvus_manager.sparse_retrieve(
             query=query,
             top_k=candidate_k,
-            filter_expr=filter_expr,
+            filter_expr=target_filter,
         )
         result = _finalize_retrieval(
             query=query,

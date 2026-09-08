@@ -14,6 +14,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from backend.evaluation.eval_artifact import (  # noqa: E402
+    build_artifact,
+    capture_command,
+    capture_git_commit,
+    hash_identity,
+    standard_statistical_definitions,
+    write_artifact,
+)
 from backend.evaluation.ragas_evaluator import (  # noqa: E402
     RAGAS_METRIC_NAMES,
     RagasMetricSuite,
@@ -110,6 +118,11 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--output-id", default="")
+    parser.add_argument(
+        "--artifact-out",
+        default="",
+        help="Path to write a uniform reproducible MANIFEST.json. Default: <output_dir>/MANIFEST.json.",
+    )
     args = parser.parse_args()
 
     unknown = set(args.metrics) - set(RAGAS_METRIC_NAMES)
@@ -189,6 +202,30 @@ def main() -> None:
     )
     print(f"Wrote RAGAS outputs to {output_dir}", flush=True)
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
+
+    artifact_path = (
+        Path(args.artifact_out) if args.artifact_out else output_dir / "MANIFEST.json"
+    )
+    try:
+        artifact = build_artifact(
+            dataset_hash=hash_identity(
+                args.source_experiment,
+                ",".join(args.baselines),
+                ",".join(args.metrics),
+                ragas_version,
+                settings.judge_model,
+            ),
+            config=config,
+            per_question=[dict(record) for record in scored],
+            summary=summary,
+            statistical_definitions=standard_statistical_definitions(),
+            command=capture_command(),
+            commit=capture_git_commit(PROJECT_ROOT),
+        )
+        write_artifact(artifact, artifact_path.parent, artifact_path.name)
+        print(f"Wrote reproducibility artifact to {artifact_path}", flush=True)
+    except Exception as exc:  # noqa: BLE001 - never break a completed evaluation run.
+        print(f"Warning: could not write reproducibility artifact: {exc}", flush=True)
 
 
 if __name__ == "__main__":

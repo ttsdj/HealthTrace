@@ -23,6 +23,12 @@ HealthTrace 已经具备较完整的个人健康档案、患者数据分域、�
 - Query Rewrite Recall@5 90.00% → 93.33%。
 - MIRAGE 从 78.78% 提升到 90%。
 
+> 本轮补全（2026-09-08）：三条结构性声明已真实落地并接入代码链路与测试——① 三层意图路由
+> 新增 LoRA-BERT 可选分类层（`backend/medical_nlp/intent_classifier.py`，未装 `peft`/无 adapter 时回退规则）；
+> ② 确认后患者事实异步镜像到 Neo4j 时序健康图谱（`backend/kg/patient_graph.py`，默认关闭、Neo4j 不可用不阻断）；
+> ③ 检索新增 Scope→Topic→Document 漏斗层（`backend/rag/funnel.py`）。数字声明（上表"必须删除"各项）仍是
+> **未验证**状态，需经 `scripts/evaluate_ragcare_full.py` 等真实跑数生成工件后回填，不得手填。
+
 ## 二、逐条对齐
 
 | 简历声明 | 判定 | 项目事实与推荐表述 |
