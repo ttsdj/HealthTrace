@@ -243,6 +243,35 @@ class SimpleAgent:
 
 
 _log_llm_config()
-model = _create_model(MODEL, temperature=0.3)
-fast_model = _create_fast_model()
+
+
+class _MissingLlmModel:
+    """保留模块可导入的占位 LLM（未配置 API key 时）。
+
+    确定性路径与测试在无 key 环境下仍应可运行，因此 import 不再立即抛错。
+    真实调用（.invoke / .astream / 其他 LLM API）在调用时抛出清晰错误，与本模块
+    原先在 import 时的 RuntimeError 信息保持一致。
+    """
+
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages, **kwargs):
+        raise RuntimeError("LLM_API_KEY or ARK_API_KEY is required")
+
+    def astream(self, messages, **kwargs):
+        raise RuntimeError("LLM_API_KEY or ARK_API_KEY is required")
+
+    def __getattr__(self, item):
+        if item.startswith("_"):
+            raise AttributeError(item)
+        raise RuntimeError("LLM_API_KEY or ARK_API_KEY is required")
+
+
+if API_KEY and BASE_URL and MODEL:
+    model = _create_model(MODEL, temperature=0.3)
+    fast_model = _create_fast_model()
+else:
+    model = fast_model = _MissingLlmModel()
+
 agent = SimpleAgent(model=model, tools=TOOLS, system_prompt=SYSTEM_PROMPT)
