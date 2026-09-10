@@ -4,7 +4,7 @@ import os
 import json
 import requests
 
-from backend.indexing.milvus_client import get_milvus_store
+from backend.indexing.milvus_client import escape_filter_value, get_milvus_store
 from backend.indexing.embedding import embedding_service as _embedding_service
 from backend.indexing.parent_chunk_store import ParentChunkStore
 from langchain.chat_models import init_chat_model
@@ -443,7 +443,9 @@ def retrieve_documents(
     candidate_k, candidate_config = resolve_candidate_k(top_k)
     target_filter = filter_expr or f"chunk_level == {LEAF_RETRIEVE_LEVEL}"
     if candidate_document_ids:
-        quoted_ids = ", ".join(f'"{d}"' for d in candidate_document_ids)
+        quoted_ids = ", ".join(
+            f'"{escape_filter_value(item)}"' for item in candidate_document_ids
+        )
         doc_filter = f"document_id in [{quoted_ids}]"
         target_filter = f"{target_filter} and {doc_filter}" if target_filter else doc_filter
     attempts: List[dict] = []

@@ -13,6 +13,7 @@ from backend.indexing import (
     IncrementalDocumentIndexer,
     MilvusWriter,
     embedding_service,
+    escape_filter_value,
     get_milvus_store,
 )
 from backend.infra.auth import get_db
@@ -680,7 +681,7 @@ async def delete_patient_document(
     db.commit()
     try:
         store = get_milvus_store("patient_record")
-        result = store.delete(f'document_id == "{document_id}"')
+        result = store.delete(f'document_id == "{escape_filter_value(document_id)}"')
         vectors_deleted = result.get("delete_count", 0) if isinstance(result, dict) else 0
         parents_deleted = parent_chunk_store.delete_by_document_id(
             document_id,

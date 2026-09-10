@@ -12,7 +12,7 @@ from backend.indexing import (
 )
 from backend.db.models import DocumentRecord, DocumentVersion
 from backend.infra.database import SessionLocal
-from backend.indexing.milvus_client import get_milvus_store
+from backend.indexing.milvus_client import escape_filter_value, get_milvus_store
 from backend.indexing.ocr import IMAGE_EXTENSIONS
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -37,7 +37,7 @@ def delete_document_transactionally(filename: str, job_manager=None, job_id=None
         job_manager.update_step(job_id, "prepare", 50, "running", "正在初始化 Milvus 集合")
     
     milvus_manager.init_collection()
-    delete_expr = f'filename == "{filename}"'
+    delete_expr = f'filename == "{escape_filter_value(filename)}"'
     
     if job_manager and job_id:
         job_manager.complete_step(job_id, "prepare", "准备完成")

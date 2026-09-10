@@ -12,13 +12,61 @@ from sqlalchemy.orm import Session
 from backend.infra.database import SessionLocal
 from backend.db.models import User
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret")
-ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+# The signing algorithm is pinned in code on purpose.  Reading it from the
+# environment (previously JWT_ALGORITHM, default HS256) let a misconfiguration
+# such as `none` turn into an authentication bypass.
+ALGORITHM = "HS256"
+MIN_JWT_SECRET_LENGTH = 32
+_PLACEHOLDER_MARKERS = ("replace", "your-", "change-this", "example", "placeholder")
+
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
 ADMIN_INVITE_CODE = os.getenv("ADMIN_INVITE_CODE", "")
 PBKDF2_ROUNDS = int(os.getenv("PASSWORD_PBKDF2_ROUNDS", "310000"))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+class JWTConfigurationError(RuntimeError):
+    """The signing key is missing or obviously insecure."""
+
+
+def is_placeholder_secret(value: str | None) -> bool:
+    lowered = (value or "").strip().lower()
+    return not lowered or any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
+
+
+def jwt_secret_key() -> str:
+    """Return the JWT signing key, or raise rather than fall back to a guessable one.
+
+    Resolved on every call instead of at import time so that a missing key can
+    never sign or verify a token, while deployments that inject the secret at
+    runtime still work.
+    """
+    raw = (os.getenv("JWT_SECRET_KEY") or "").strip()
+    if len(raw) < MIN_JWT_SECRET_LENGTH or is_placeholder_secret(raw):
+        raise JWTConfigurationError(
+            "JWT_SECRET_KEY must be set to a non-placeholder secret of at least "
+            f"{MIN_JWT_SECRET_LENGTH} characters"
+        )
+    return raw
+
+
+def validate_jwt_configuration() -> None:
+    """Raise if the JWT signing key is unusable. Used for fail-fast startup."""
+    jwt_secret_key()
+
+
+def _auth_not_configured() -> HTTPException:
+    """503 for endpoints that need a signing key when the key is unusable.
+
+    The reason is deliberately not echoed back: the caller is unauthenticated and
+    would otherwise learn from the response whether a secret is configured.
+    """
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="authentication is not configured",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def get_db(request: Request):
@@ -95,7 +143,11 @@ def create_access_token(username: str, role: str) -> str:
         "role": role,
         "exp": expire,
     }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    try:
+        secret = jwt_secret_key()
+    except JWTConfigurationError as exc:
+        raise _auth_not_configured() from exc
+    return jwt.encode(payload, secret, algorithm=ALGORITHM)
 
 
 def authenticate_user(db: Session, username: str, password: str) -> User | None:
@@ -118,7 +170,12 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        secret = jwt_secret_key()
+    except JWTConfigurationError as exc:
+        raise _auth_not_configured() from exc
+
+    try:
+        payload = jwt.decode(token, secret, algorithms=[ALGORITHM])
         username = payload.get("sub")
         if not username:
             raise credentials_exception

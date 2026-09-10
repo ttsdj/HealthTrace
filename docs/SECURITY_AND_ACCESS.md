@@ -16,6 +16,23 @@ User
 - `read` 只能读取，`write` 可以新增和修改患者资料，`manage` 可以管理授权。
 - 全局管理员用于平台运维，不替代患者所属机构的授权流程。
 
+### 哪些成员角色不能由 tenant 管理员分配
+
+`POST /tenant/members` 接受 `admin` / `clinician` / `viewer`，但 **`clinician` 只能由全局管理员分配**。
+
+原因：`clinician` 不是租户内部职位，而是平台级临床凭证——
+`backend.evaluation.golden_review.reviewer_role()` 接受它作为临床审核意见，
+`golden_readiness()["clinical_claim_allowed"]` 正来自该角色，
+且该凭证对**所有**数据集生效，与成员所属租户无关。
+
+任何自助注册的用户都会通过 `backend.patient.scope.ensure_user_scope()`
+成为其个人租户的 `owner`，因此仅靠租户级校验，任何人都能给自己签发临床审核意见。
+分配 `clinician` 必须先通过 `POST /auth/register` 的 `admin_code`
+（`ADMIN_INVITE_CODE`）成为全局管理员。
+
+该规则由 `backend/api/routes/access_control.py` 的 `_OPERATOR_ONLY_MEMBER_ROLES`
+实现，回归测试见 `tests/test_security_hardening.py`。
+
 ## 敏感数据
 
 `patient_sensitive_records` 用于保存不适合明文扩展到业务表的私密 JSON：

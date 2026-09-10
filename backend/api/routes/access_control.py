@@ -38,6 +38,18 @@ from backend.security.crypto import (
 
 router = APIRouter(tags=["access-control"])
 
+# Membership roles that carry a platform-wide credential instead of describing a
+# position inside one tenant.
+#
+# ``clinician`` is what backend.evaluation.golden_review.reviewer_role() accepts
+# as the clinical approval behind golden_readiness()["clinical_claim_allowed"],
+# and it is accepted for every dataset regardless of which tenant the membership
+# belongs to. A tenant administrator must therefore not be able to hand it out:
+# backend.patient.scope.ensure_user_scope() makes any self-registered user the
+# owner of a personal tenant, so a tenant-level check alone would let anyone
+# sign their own clinical review.
+_OPERATOR_ONLY_MEMBER_ROLES = frozenset({"clinician"})
+
 
 def _tenant_admin_membership(db: Session, user: User, tenant_id: str) -> TenantMembership:
     membership = (
@@ -91,6 +103,11 @@ async def add_tenant_member(
 ):
     scope = ensure_user_scope(db, current_user)
     _tenant_admin_membership(db, current_user, scope.tenant_id)
+    if request.role in _OPERATOR_ONLY_MEMBER_ROLES and current_user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail=f"The '{request.role}' role can only be assigned by a platform administrator",
+        )
     target = db.query(User).filter(User.username == request.username).first()
     if target is None:
         raise HTTPException(status_code=404, detail="User not found")

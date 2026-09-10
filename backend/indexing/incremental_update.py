@@ -19,7 +19,11 @@ from backend.db.models import (
     DocumentVersionParentChunk,
     ParentChunk,
 )
-from backend.indexing.milvus_client import MilvusStore, get_milvus_store
+from backend.indexing.milvus_client import (
+    MilvusStore,
+    escape_filter_value,
+    get_milvus_store,
+)
 from backend.indexing.milvus_writer import MilvusWriter
 from backend.indexing.parent_chunk_store import ParentChunkStore
 from backend.indexing.text_normalization import (
@@ -177,7 +181,7 @@ def build_embedding_reuse_plan(
 
 
 def _escape_filter_value(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    return escape_filter_value(value)
 
 
 def _delete_ids(store: MilvusStore, ids: list[int], batch_size: int = 500) -> int:

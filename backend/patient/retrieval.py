@@ -28,12 +28,14 @@ def retrieve_patient_records(
 ) -> dict:
     """Retrieve private evidence with mandatory server-derived scope filters."""
     from backend.indexing.embedding import embedding_service
-    from backend.indexing.milvus_client import get_milvus_store
+    from backend.indexing.milvus_client import escape_filter_value, get_milvus_store
 
     store = get_milvus_store("patient_record")
     filter_expr = patient_scope_filter(scope)
     if candidate_document_ids:
-        quoted_ids = ", ".join(f'"{d}"' for d in candidate_document_ids)
+        quoted_ids = ", ".join(
+            f'"{escape_filter_value(item)}"' for item in candidate_document_ids
+        )
         filter_expr = f"{filter_expr} and document_id in [{quoted_ids}]"
     attempts: list[dict] = []
     dense: list[float] | None = None

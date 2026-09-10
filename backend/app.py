@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from backend.api import router
+from backend.infra.auth import validate_jwt_configuration
 from backend.infra.database import init_db
 from backend.jobs.worker import start_background_job_worker, stop_background_job_worker
 from backend.security.middleware import (
@@ -44,6 +45,12 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def _startup_init_db():
+        # Under STRICT_STARTUP (set by docker-compose.app.yml) refuse to serve
+        # traffic when the JWT signing key is absent or a known placeholder.
+        # Otherwise authentication already fails closed per request in
+        # backend.infra.auth.jwt_secret_key().
+        if os.getenv("STRICT_STARTUP", "false").lower() == "true":
+            validate_jwt_configuration()
         try:
             init_db()
         except Exception as exc:

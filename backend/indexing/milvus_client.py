@@ -11,6 +11,18 @@ from pymilvus import AnnSearchRequest, DataType, MilvusClient, RRFRanker, Functi
 QUERY_MAX_LIMIT = 16384
 T = TypeVar("T")
 
+
+def escape_filter_value(value: object) -> str:
+    """Escape a value before embedding it in a double-quoted Milvus filter literal.
+
+    Milvus filter expressions are parsed, not parameterised: a raw value
+    containing a quote terminates the literal and can append further clauses.
+    ``filename == "x" or filename != ""`` for instance matches every row in the
+    collection, so every caller that interpolates must escape first.
+    """
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
 COLLECTION_ENV_BY_KIND = {
     "medical_qa": "MILVUS_MEDICAL_QA_COLLECTION",
     "patient_record": "MILVUS_PATIENT_RECORD_COLLECTION",
@@ -267,7 +279,7 @@ class MilvusStore:
         ids = [item for item in chunk_ids if item]
         if not ids:
             return []
-        quoted_ids = ", ".join(f'"{item}"' for item in ids)
+        quoted_ids = ", ".join(f'"{escape_filter_value(item)}"' for item in ids)
         return self.query(
             filter_expr=f"chunk_id in [{quoted_ids}]",
             output_fields=[

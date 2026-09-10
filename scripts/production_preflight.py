@@ -5,14 +5,7 @@ import os
 from pathlib import Path
 
 from backend.env import PROJECT_ROOT, load_env
-
-
-def _is_placeholder(value: str) -> bool:
-    lowered = value.strip().lower()
-    return not lowered or any(
-        marker in lowered
-        for marker in ("replace", "your-", "change-this", "example", "placeholder")
-    )
+from backend.infra.auth import MIN_JWT_SECRET_LENGTH, is_placeholder_secret
 
 
 def main() -> int:
@@ -35,8 +28,8 @@ def main() -> int:
     jwt_secret = os.getenv("JWT_SECRET_KEY", "")
     check(
         "jwt_secret",
-        len(jwt_secret) >= 32 and not _is_placeholder(jwt_secret),
-        "JWT_SECRET_KEY must be a non-placeholder secret of at least 32 characters.",
+        len(jwt_secret) >= MIN_JWT_SECRET_LENGTH and not is_placeholder_secret(jwt_secret),
+        f"JWT_SECRET_KEY must be a non-placeholder secret of at least {MIN_JWT_SECRET_LENGTH} characters.",
     )
     raw_key = os.getenv("HEALTHTRACE_FIELD_ENCRYPTION_KEY", "")
     try:

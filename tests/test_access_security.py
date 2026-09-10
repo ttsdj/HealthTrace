@@ -82,7 +82,7 @@ def test_tenant_member_patient_grant_and_sensitive_record_flow(tmp_path, monkeyp
     member = client.post(
         "/tenant/members",
         headers=alice_headers,
-        json={"username": "access-bob", "role": "clinician"},
+        json={"username": "access-bob", "role": "viewer"},
     )
     assert member.status_code == 200
     grant = client.post(
@@ -141,7 +141,9 @@ def test_tenant_member_patient_grant_and_sensitive_record_flow(tmp_path, monkeyp
     assert listed.json()[0]["payload"]["policy_number"] == "PRIVATE-123"
 
     with Session() as db:
-        assert db.query(TenantMembership).filter_by(role="clinician").count() == 1
+        # A tenant owner may seat members, but may not mint the operator-only
+        # clinician credential (see _OPERATOR_ONLY_MEMBER_ROLES).
+        assert db.query(TenantMembership).filter_by(role="viewer").count() == 1
         assert db.query(PatientAccessGrant).filter_by(permission="write").count() == 1
         stored = db.query(PatientSensitiveRecord).one()
         assert "PRIVATE-123" not in stored.ciphertext

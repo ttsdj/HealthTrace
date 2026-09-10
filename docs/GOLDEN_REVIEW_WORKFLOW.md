@@ -21,6 +21,8 @@ JSONL import
 - 同一审核人只能贡献一份有效审核。
 - 默认至少需要两份独立批准。
 - `clinical_review_required=true` 的用例至少需要一名 clinician 角色审核。
+  该 `clinician` 成员角色属于平台级临床凭证，只能由全局管理员通过
+  `POST /tenant/members` 分配，租户管理员无法自行授予（详见 `SECURITY_AND_ACCESS.md`）。
 - 正式后台评测在数据集未 ready 时返回冲突，不偷偷使用 draft。
 
 ## 当前真实状态
