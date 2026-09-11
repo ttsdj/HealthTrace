@@ -1,13 +1,47 @@
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from threading import Lock
 
 _BUCKETS = (0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
+
+# Label values have to come from a bounded set.  A request that matches no route
+# -- a scanner walking random URLs -- has no route template, and using its raw
+# path as the label would add one time series per probe to the dicts below until
+# the process runs out of memory.  backend.security.middleware passes
+# UNMATCHED_ROUTE for those; the cap here is the second line of defence for any
+# caller that interpolates something unbounded.
+UNMATCHED_ROUTE = "/unmatched"
+_OVERFLOW_ROUTE = "/other"
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+_MAX_ROUTE_SERIES = _positive_int_env("HEALTHTRACE_METRICS_MAX_ROUTES", 200)
+
 _lock = Lock()
 _request_counts: dict[tuple[str, str, str], int] = defaultdict(int)
 _request_duration_counts: dict[tuple[str, str, float], int] = defaultdict(int)
 _request_duration_sum: dict[tuple[str, str], float] = defaultdict(float)
+_known_routes: set[str] = set()
+
+
+def _bounded_route(route: str) -> str:
+    """Map a route onto a label from a bounded set. Caller must hold _lock."""
+    if not route.startswith("/"):
+        return UNMATCHED_ROUTE
+    if route in _known_routes:
+        return route
+    if len(_known_routes) >= _MAX_ROUTE_SERIES:
+        return _OVERFLOW_ROUTE
+    _known_routes.add(route)
+    return route
 
 
 def record_http_request(
@@ -17,15 +51,25 @@ def record_http_request(
     status_code: int,
     duration_seconds: float,
 ) -> None:
-    safe_route = route if route.startswith("/") else "/unknown"
     status_class = f"{max(1, min(status_code // 100, 5))}xx"
-    key = (method.upper(), safe_route, status_class)
+    normalized_method = method.upper()
+    duration = max(0.0, duration_seconds)
     with _lock:
-        _request_counts[key] += 1
-        _request_duration_sum[(method.upper(), safe_route)] += max(0.0, duration_seconds)
+        safe_route = _bounded_route(route)
+        _request_counts[(normalized_method, safe_route, status_class)] += 1
+        _request_duration_sum[(normalized_method, safe_route)] += duration
         for bucket in _BUCKETS:
-            if duration_seconds <= bucket:
-                _request_duration_counts[(method.upper(), safe_route, bucket)] += 1
+            if duration <= bucket:
+                _request_duration_counts[(normalized_method, safe_route, bucket)] += 1
+
+
+def reset_process_metrics() -> None:
+    """Drop every series. Intended for tests that assert on metric output."""
+    with _lock:
+        _request_counts.clear()
+        _request_duration_counts.clear()
+        _request_duration_sum.clear()
+        _known_routes.clear()
 
 
 def _labels(**values: str) -> str:

@@ -12,11 +12,19 @@ from backend.infra.auth import (
 )
 from backend.schemas import AuthResponse, CurrentUserResponse, LoginRequest, RegisterRequest
 from backend.patient.scope import ensure_user_scope
+from backend.security.rate_limit import (
+    enforce_login_rate_limit,
+    enforce_register_rate_limit,
+)
 
 router = APIRouter(tags=["auth"])
 
 
-@router.post("/auth/register", response_model=AuthResponse)
+@router.post(
+    "/auth/register",
+    response_model=AuthResponse,
+    dependencies=[Depends(enforce_register_rate_limit)],
+)
 async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     username = (request.username or "").strip()
     password = (request.password or "").strip()
@@ -44,7 +52,11 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/auth/login", response_model=AuthResponse)
+@router.post(
+    "/auth/login",
+    response_model=AuthResponse,
+    dependencies=[Depends(enforce_login_rate_limit)],
+)
 async def login(request: LoginRequest, db: Session = Depends(get_db)):
     user = authenticate_user(db, request.username, request.password)
     if not user:

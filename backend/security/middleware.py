@@ -12,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from backend.infra.auth import get_db
 from backend.infra.database import SessionLocal
 from backend.security.audit import append_audit_event
-from backend.observability.metrics import record_http_request
+from backend.observability.metrics import UNMATCHED_ROUTE, record_http_request
 
 _AUDITED_PREFIXES = (
     "/auth",
@@ -116,7 +116,11 @@ async def audit_request_middleware(request: Request, call_next):
         error_type = type(exc).__name__
         raise
     finally:
-        route = getattr(request.scope.get("route"), "path", None) or path
+        # Only a matched route has a template.  Falling back to the raw path
+        # here would make every distinct URL a new metric label, so unmatched
+        # requests -- scanners walking random paths -- share one series instead.
+        matched_route = getattr(request.scope.get("route"), "path", None)
+        route = matched_route or UNMATCHED_ROUTE
         elapsed = perf_counter() - started
         record_http_request(
             method=request.method,
@@ -124,7 +128,12 @@ async def audit_request_middleware(request: Request, call_next):
             status_code=status_code,
             duration_seconds=elapsed,
         )
-        if audited and bulkhead_acquired:
+        # An unmatched path reached no endpoint: no resource was read or
+        # written and no authorization decision was made, so there is nothing to
+        # account for.  Writing a row anyway let an unauthenticated caller fill
+        # the audit table by walking random URLs under an audited prefix.  The
+        # request is still counted in the metrics above.
+        if audited and bulkhead_acquired and matched_route is not None:
             user = getattr(request.state, "current_user", None)
             scope = getattr(request.state, "patient_scope", None)
             metadata = {
