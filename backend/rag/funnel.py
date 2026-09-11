@@ -30,7 +30,11 @@ from typing import Any, List, Optional, Tuple
 from backend.indexing.milvus_client import COLLECTION_DEFAULT_BY_KIND, get_milvus_store
 from backend.medical_nlp.intent import analyze_medical_query
 from backend.patient.context import required_resource_types, should_query_patient_context
-from backend.patient.retrieval import patient_scope_filter, retrieve_patient_records
+from backend.patient.retrieval import (
+    patient_scope_filter,
+    patient_scope_predicate,
+    retrieve_patient_records,
+)
 from backend.rag.utils import dedupe_documents, retrieve_documents, retrieval_trace_fields
 
 PUBLIC_DOMAIN = "public"
@@ -220,12 +224,18 @@ def _candidate_document_ids(
     store: Any,
     topic: Optional[TopicQuery],
     max_documents: Optional[int] = None,
+    scope_predicate: str = "",
 ) -> List[str]:
     """Best-effort document-level narrowing: distinct document_id(s) matching topic terms.
 
     Only touched when the store exposes ``query``/``query_all`` (real MilvusStore
     does; lightweight fake stores in tests may not). Degrades to ``[]`` (i.e. no
     document-level narrowing — search all documents) on any failure.
+
+    ``scope_predicate`` must be supplied whenever the store is a patient-record
+    collection: the topic terms alone match every tenant's documents, and the
+    resulting id list is echoed to the caller in the funnel trace, so an
+    unscoped query here discloses other tenants' document identifiers.
     """
     terms = topic.document_terms if topic else ()
     if not terms or max_documents == 0:
@@ -237,6 +247,8 @@ def _candidate_document_ids(
 
     clauses = " or ".join(f'section_path like "%{t}%"' for t in terms)
     filter_expr = f"chunk_level in [1, 2] and ({clauses})"
+    if scope_predicate:
+        filter_expr = f"{scope_predicate} and {filter_expr}"
     try:
         rows = store.query_all(filter_expr, ["document_id"])
     except Exception:
@@ -305,7 +317,11 @@ def stage_document(
     if scope.domain in (PATIENT_DOMAIN, BOTH_DOMAIN) and scope.patient_scope is not None:
         try:
             store = get_milvus_store(_PATIENT_RECORD_KIND)
-            document_ids = _candidate_document_ids(store, topic)
+            document_ids = _candidate_document_ids(
+                store,
+                topic,
+                scope_predicate=patient_scope_predicate(scope.patient_scope),
+            )
             result = retrieve_patient_records(
                 question,
                 scope.patient_scope,
