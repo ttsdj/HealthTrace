@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +12,27 @@ from backend.infra.auth import get_current_user
 from backend.schemas import ChatRequest, ChatResponse
 
 router = APIRouter(tags=["chat"])
+
+logger = logging.getLogger("healthtrace.chat")
+
+
+def _sanitized_upstream_error(exc: Exception) -> tuple[int, str]:
+    """Map an upstream failure to a status code and a client-safe message.
+
+    Raw provider errors embed base URLs, model names and request ids, so the
+    full text goes to server logs only and callers get a generic message.
+    """
+    message = str(exc)
+    logger.warning("chat upstream error: %s: %s", type(exc).__name__, message)
+    match = re.search(r"Error code:\s*(\d{3})", message)
+    if match:
+        code = int(match.group(1))
+        if code == 429:
+            return 429, "上游模型服务触发限流/额度限制，请稍后重试或检查服务额度。"
+        if code in (401, 403):
+            return 502, "上游模型服务认证失败，请联系管理员检查服务配置。"
+        return 502, "上游模型服务暂时不可用，请稍后重试。"
+    return 500, "咨询服务暂时不可用，请稍后重试。"
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -36,22 +58,8 @@ async def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_c
             return ChatResponse(**resp)
         return ChatResponse(response=resp)
     except Exception as e:
-        message = str(e)
-        match = re.search(r"Error code:\s*(\d{3})", message)
-        if match:
-            code = int(match.group(1))
-            if code == 429:
-                raise HTTPException(
-                    status_code=429,
-                    detail=(
-                        "上游模型服务触发限流/额度限制（429）。请检查账号额度/模型状态。\n"
-                        f"原始错误：{message}"
-                    ),
-                )
-            if code in (401, 403):
-                raise HTTPException(status_code=code, detail=message)
-            raise HTTPException(status_code=code, detail=message)
-        raise HTTPException(status_code=500, detail=message)
+        status_code, detail = _sanitized_upstream_error(e)
+        raise HTTPException(status_code=status_code, detail=detail)
 
 
 @router.post("/chat/stream")
@@ -72,7 +80,8 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: User = Depend
             ):
                 yield chunk
         except Exception as e:
-            error_data = {"type": "error", "content": str(e)}
+            _, detail = _sanitized_upstream_error(e)
+            error_data = {"type": "error", "content": detail}
             yield f"data: {json.dumps(error_data)}\n\n"
 
     return StreamingResponse(

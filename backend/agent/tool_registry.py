@@ -95,10 +95,19 @@ def execution_plan_context(plan: dict | None):
         _EXECUTION_PLAN.reset(token)
 
 
+# When no Planner plan is active, fall back to a conservative default instead
+# of silently allowing everything: read-only knowledge/support tools stay
+# usable for callers that never go through the Planner, while the only
+# write-capable tool stays unreachable without an explicit plan.
+_UNPLANED_ALLOWED_TOOLS = frozenset(
+    item.name for item in CORE_TOOLS if item.read_only
+) | SUPPORT_TOOL_NAMES
+
+
 def tool_is_allowed(tool_name: str) -> bool:
     plan = _EXECUTION_PLAN.get()
     if plan is None:
-        return True
+        return tool_name in _UNPLANED_ALLOWED_TOOLS
     return tool_name in set(plan.get("allowed_tools") or [])
 
 

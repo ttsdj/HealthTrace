@@ -1,8 +1,19 @@
 import base64
+import os
 import secrets
 from pathlib import Path
 
 from backend.env import PROJECT_ROOT
+
+
+def _write_private(path: Path, content: str) -> None:
+    """Write secrets with owner-only permissions (0600 where supported)."""
+    if os.name == "posix":
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+    else:
+        path.write_text(content, encoding="utf-8")
 
 
 def _replace(
@@ -68,7 +79,7 @@ def main() -> int:
         "HEALTHTRACE_FIELD_ENCRYPTION_KEY",
         base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii"),
     )
-    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_private(target, "\n".join(lines) + "\n")
     print(f".env {action}.")
     print("Generated JWT and field-encryption secrets locally.")
     print("Still required: LLM_API_KEY, BASE_URL, MODEL, FAST_MODEL, GRADE_MODEL.")

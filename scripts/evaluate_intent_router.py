@@ -1,4 +1,4 @@
-"""Run the frozen 100-case intent-router acceptance suite."""
+"""Run the frozen intent-router acceptance suite."""
 
 from __future__ import annotations
 

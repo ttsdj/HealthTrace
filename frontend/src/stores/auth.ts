@@ -89,7 +89,11 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    handleLogout() {
+    async handleLogout() {
+      // Local cleanup runs first so the UI is never blocked on the network;
+      // the still-valid token is then revoked server-side (denylist its jti)
+      // with an explicit Authorization header. Best-effort only.
+      const token = this.token;
       this.token = '';
       this.currentUser = null;
       localStorage.removeItem('accessToken');
@@ -101,6 +105,16 @@ export const useAuthStore = defineStore('auth', {
       chatStore.$reset();
       healthRecordStore.$reset();
       useObservabilityStore().$reset();
+
+      if (token) {
+        try {
+          await api.post('/auth/logout', null, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch {
+          // Ignore network/401 failures from the revocation call.
+        }
+      }
     },
   },
 });

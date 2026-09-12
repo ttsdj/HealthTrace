@@ -8,7 +8,8 @@ on:
 permissions:
   contents: read
   packages: write
-  id-token: write
+  # id-token is intentionally absent: no step performs keyless signing, and
+  # provenance/SBOM attestations do not require OIDC token minting.
 
 jobs:
   build-and-publish:

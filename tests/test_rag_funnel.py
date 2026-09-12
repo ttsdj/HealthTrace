@@ -118,7 +118,11 @@ _PATIENT_DOC = {
 
 def _patch_retrievals(monkeypatch, *, fail_public=False):
     """Patch the funnel's retrieval dependencies so no Milvus/DB is touched."""
-    monkeypatch.setattr(funnel, "_candidate_document_ids", lambda store, topic, max_documents=None: ["doc-a"])
+    monkeypatch.setattr(
+        funnel,
+        "_candidate_document_ids",
+        lambda store, topic, max_documents=None, **kwargs: ["doc-a"],
+    )
 
     def _public(query, top_k, **kwargs):
         if fail_public:
@@ -148,7 +152,11 @@ def test_run_funnel_returns_docs_and_funnel_trace(monkeypatch):
 
 
 def test_run_funnel_public_question_uses_public_scope(monkeypatch):
-    monkeypatch.setattr(funnel, "_candidate_document_ids", lambda store, topic, max_documents=None: [])
+    monkeypatch.setattr(
+        funnel,
+        "_candidate_document_ids",
+        lambda store, topic, max_documents=None, **kwargs: [],
+    )
     monkeypatch.setattr(
         funnel,
         "retrieve_documents",
@@ -181,13 +189,71 @@ def test_failure_in_scope_stage_degrades_to_public_fallback_without_raising(monk
 def test_document_stage_failure_never_raises(monkeypatch):
     _patch_retrievals(monkeypatch, fail_public=True)
     # Prevent any candidate narrowing from touching the store.
-    monkeypatch.setattr(funnel, "_candidate_document_ids", lambda store, topic, max_documents=None: [])
+    monkeypatch.setattr(
+        funnel,
+        "_candidate_document_ids",
+        lambda store, topic, max_documents=None, **kwargs: [],
+    )
 
     docs, funnel_trace = funnel.run_funnel("高血压的治疗")
 
     assert docs == []
     assert funnel_trace["document"].get("degraded", False) is True
     assert funnel_trace["degraded"] is True
+
+
+def test_patient_document_candidates_stay_inside_the_patient_scope(monkeypatch):
+    """The candidate-document query read the whole shared patient collection.
+
+    ``_candidate_document_ids`` built its predicate from ``chunk_level`` and
+    ``section_path`` only -- it never received the scope -- so the id list it
+    returned came from every tenant. That list is copied into
+    ``funnel_trace["document"]["document_ids"]`` (``stage_document``) and the
+    trace is streamed verbatim by ``/chat/stream``, so an authenticated caller
+    read back other patients' document identifiers.
+    """
+    queries: list[tuple[str, str]] = []
+
+    class _Store:
+        def __init__(self, kind: str) -> None:
+            self.kind = kind
+
+        def query_all(self, filter_expr, output_fields=None):
+            queries.append((self.kind, filter_expr))
+            return []
+
+    monkeypatch.setattr(funnel, "get_milvus_store", lambda kind: _Store(kind))
+    monkeypatch.setattr(funnel, "should_query_patient_context", lambda query: True)
+    monkeypatch.setattr(
+        funnel,
+        "retrieve_documents",
+        lambda query, top_k, **kwargs: {"docs": [], "meta": {}},
+    )
+    monkeypatch.setattr(
+        funnel,
+        "retrieve_patient_records",
+        lambda query, scope, top_k, **kwargs: {"docs": [], "mode": "stub", "attempts": []},
+    )
+
+    topic = funnel.TopicQuery(("高血压",), (), "", ("高血压",), "test")
+    scope = funnel.stage_scope(
+        "高血压我的体检报告", PatientScope("tenant-a", "patient-a", 7, "alice")
+    )
+    assert scope.domain == "both"
+
+    funnel.stage_document("高血压我的体检报告", scope, topic)
+
+    patient_queries = [expr for kind, expr in queries if kind == funnel._PATIENT_RECORD_KIND]
+    assert patient_queries, "the patient document query must reach the patient collection"
+    for expr in patient_queries:
+        assert 'document_domain == "patient_private"' in expr
+        assert 'tenant_id == "tenant-a"' in expr
+        assert 'patient_id == "patient-a"' in expr
+    # Public medical knowledge is shared on purpose: no tenant term belongs there.
+    public_queries = [expr for kind, expr in queries if kind == funnel._MEDICAL_QA_KIND]
+    assert public_queries, "the public document query must still run"
+    for expr in public_queries:
+        assert "tenant_id" not in expr
 
 
 # ---------------------------------------------------------------------------

@@ -49,6 +49,7 @@ class MilvusSettings:
     collection_name: str
     uri: str
     timeout: float
+    token: str | None = None
 
     @classmethod
     def from_env(cls, collection_name: str | None = None) -> MilvusSettings:
@@ -56,12 +57,17 @@ class MilvusSettings:
         port = os.getenv("MILVUS_PORT", "19530")
         collection = collection_name or os.getenv("MILVUS_COLLECTION", "med_medical_qa")
         timeout = float(os.getenv("MILVUS_TIMEOUT", "30"))
+        # Optional bearer token for deployments that enable Milvus
+        # authorization (root user/password); unset keeps unauthenticated
+        # access working for loopback-only setups.
+        token = (os.getenv("MILVUS_TOKEN") or "").strip() or None
         return cls(
             host=host,
             port=port,
             collection_name=collection,
             uri=f"http://{host}:{port}",
             timeout=timeout,
+            token=token,
         )
 
 
@@ -69,7 +75,7 @@ class MilvusSettings:
 def milvus_client_session(settings: MilvusSettings | None = None) -> Iterator[MilvusClient]:
     """一次 RPC 会话：创建连接，用完后关闭，不缓存 gRPC channel。"""
     cfg = settings or MilvusSettings.from_env()
-    client = MilvusClient(uri=cfg.uri, timeout=cfg.timeout)
+    client = MilvusClient(uri=cfg.uri, token=cfg.token, timeout=cfg.timeout)
     try:
         yield client
     finally:

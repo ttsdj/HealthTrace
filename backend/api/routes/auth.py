@@ -8,15 +8,25 @@ from backend.infra.auth import (
     get_current_user,
     get_db,
     get_password_hash,
+    oauth2_scheme,
     resolve_role,
+    revoke_access_token,
 )
 from backend.schemas import AuthResponse, CurrentUserResponse, LoginRequest, RegisterRequest
 from backend.patient.scope import ensure_user_scope
+from backend.security.rate_limit import (
+    enforce_login_rate_limit,
+    enforce_register_rate_limit,
+)
 
 router = APIRouter(tags=["auth"])
 
 
-@router.post("/auth/register", response_model=AuthResponse)
+@router.post(
+    "/auth/register",
+    response_model=AuthResponse,
+    dependencies=[Depends(enforce_register_rate_limit)],
+)
 async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     username = (request.username or "").strip()
     password = (request.password or "").strip()
@@ -44,7 +54,11 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/auth/login", response_model=AuthResponse)
+@router.post(
+    "/auth/login",
+    response_model=AuthResponse,
+    dependencies=[Depends(enforce_login_rate_limit)],
+)
 async def login(request: LoginRequest, db: Session = Depends(get_db)):
     user = authenticate_user(db, request.username, request.password)
     if not user:
@@ -71,3 +85,14 @@ async def me(current_user: User = Depends(get_current_user), db: Session = Depen
         tenant_id=scope.tenant_id,
         patient_id=scope.patient_id,
     )
+
+
+@router.post("/auth/logout")
+async def logout(
+    token: str = Depends(oauth2_scheme),
+    current_user: User = Depends(get_current_user),
+):
+    # Server-side revocation: denylist the token's jti until natural expiry so
+    # a logged-out (or stolen) bearer stops working before the token expires.
+    revoked = revoke_access_token(token)
+    return {"detail": "logged out", "revoked": revoked}

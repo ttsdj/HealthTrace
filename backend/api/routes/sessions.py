@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from backend.chat.storage import ConversationStorage
@@ -13,6 +15,7 @@ from backend.schemas import (
 
 router = APIRouter(tags=["sessions"])
 storage = ConversationStorage()
+logger = logging.getLogger("healthtrace.sessions")
 
 
 @router.get("/sessions/{session_id}", response_model=SessionMessagesResponse)
@@ -33,7 +36,8 @@ async def get_session_messages(session_id: str, current_user: User = Depends(get
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.warning("load session messages failed: %s: %s", type(exc).__name__, exc)
+        raise HTTPException(status_code=500, detail="会话消息读取失败") from exc
 
 
 @router.get("/sessions", response_model=SessionListResponse)
@@ -43,7 +47,8 @@ async def list_sessions(current_user: User = Depends(get_current_user)):
         sessions.sort(key=lambda x: x.updated_at, reverse=True)
         return SessionListResponse(sessions=sessions)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.warning("list sessions failed: %s: %s", type(exc).__name__, exc)
+        raise HTTPException(status_code=500, detail="会话列表读取失败") from exc
 
 
 @router.delete("/sessions/{session_id}", response_model=SessionDeleteResponse)
@@ -56,4 +61,5 @@ async def delete_session(session_id: str, current_user: User = Depends(get_curre
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.warning("delete session failed: %s: %s", type(exc).__name__, exc)
+        raise HTTPException(status_code=500, detail="会话删除失败") from exc

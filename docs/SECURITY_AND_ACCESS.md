@@ -33,6 +33,17 @@ User
 该规则由 `backend/api/routes/access_control.py` 的 `_OPERATOR_ONLY_MEMBER_ROLES`
 实现，回归测试见 `tests/test_security_hardening.py`。
 
+### 查询患者记录集合必须带 scope 子句
+
+`healthtrace_patient_record_text_v1` 是全平台共用的集合，**每一个**读它的查询都必须带上
+`backend.patient.retrieval.patient_scope_predicate()` 给出的
+`document_domain` + `tenant_id` + `patient_id` 子句。该子句只有一份实现，
+新调用点应当**导入**它而不是照抄一份。漏斗检索的候选文档查询正是因为漏掉了它，
+把其他租户的患者文档 id 随 `rag_trace` 回传给了调用方
+（见 `CHANGES_2026-09-10.md` 第 5 节）。
+
+公开医学知识库（`med_medical_qa_v2`）是全局知识，其查询**不应**带租户条件。
+
 ## 敏感数据
 
 `patient_sensitive_records` 用于保存不适合明文扩展到业务表的私密 JSON：
@@ -55,6 +66,28 @@ HTTP 中间件记录：
 
 审计日志不记录请求正文、回答正文、病历正文、token 或密钥。管理端通过 `/audit/events` 查询。
 
+只对**匹配到路由**的请求写审计。未匹配的 404 没有触达端点、没有读写资源、也没有做授权判断，
+因此没有可问责内容；若照写，未认证请求遍历随机 URL 即可持续往审计表插行。
+这类请求仍计入指标（统一归入 `route="/unmatched"`，不会为每个 URL 生成一条时间序列）。
+
+已匹配路由上的 401/403/404 是真实授权拒绝，**照常审计**，不因限流而丢弃——
+否则攻击者可通过洪泛压制同一出口 IP 下其他用户的审计记录。
+
+## 限流
+
+`/auth/login` 与 `/auth/register` 经 `backend/security/rate_limit.py` 做进程内固定窗口限流，
+超限返回 429 + `Retry-After`。默认登录 20 次/60 秒、注册 5 次/300 秒。
+
+两个限制必须在下线前确认：
+
+1. **计数在单 worker 进程内**，N 个 worker 的实际上限是配置值的 N 倍。
+2. **客户端身份默认取对端地址**。反向代理后面所有用户共用一个桶，此时需要
+   `HEALTHTRACE_TRUST_PROXY_HEADERS=true`；只有在代理由你控制并会覆写
+   `X-Forwarded-For` 时才能打开，否则任何客户端都能伪造该头换桶绕过。
+
+因此进程内限流不能替代**反向代理层的限流**，尤其是针对已匹配路由的未认证洪泛
+（见 `CHANGES_2026-09-10.md` 第 4.2、4.3 节）。
+
 ## 生产要求
 
 1. 用 KMS 或 Secret Manager 托管 JWT、LLM 和字段加密密钥。
@@ -62,4 +95,15 @@ HTTP 中间件记录：
 3. 只允许 HTTPS，限制 CORS 与反向代理来源。
 4. 定期验证备份恢复、密钥可用性和审计留存策略。
 5. 临床或真实患者数据上线前完成隐私影响评估与访问审批。
+6. 在反向代理层配置速率限制与请求体大小上限，不要只依赖应用内限流。
 
+
+## 令牌吊销（2026-09-12）
+
+- 访问令牌包含 `jti` 声明；`POST /auth/logout` 会把当前令牌的 `jti` 写入 Redis
+  denylist（键 `jwt_denylist:<jti>`，TTL 为令牌剩余有效期），`get_current_user`
+  每次校验时检查该列表，登出或泄露的令牌在自然过期前即失效。
+- denylist 检查与缓存一致采取**尽力而为**语义：Redis 不可用时检查跳过（fail-open），
+  不会因缓存故障把全体用户锁在门外；令牌本身仍按短有效期 + fail-closed 签名密钥约束。
+- 令牌载体仍是 `localStorage`（已知未修复项），因此吊销机制是 XSS 场景下的兜底，
+  不是根治；根治需要迁移到 HttpOnly Cookie 会话。

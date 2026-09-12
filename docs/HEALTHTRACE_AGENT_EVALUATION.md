@@ -2,7 +2,7 @@
 
 ## 目的
 
-该评测验证 Health Agent 的工程决策是否按预期执行，不用于证明医学答案达到临床水平。数据集位于 `evaluation/healthtrace_agent_v1.jsonl`，共 42 条人工规则用例。
+该评测验证 Health Agent 的工程决策是否按预期执行，不用于证明医学答案达到临床水平。数据集位于 `evaluation/healthtrace_agent_v1.jsonl`，为人工规则用例集。
 
 ## 覆盖范围
 
@@ -21,7 +21,7 @@
 .venv\Scripts\python.exe scripts\evaluate_healthtrace_agent.py --output-id policy-v1
 ```
 
-2026-07-22 本地结果为 42/42：Action、Evidence State、证据源、患者工具、隐私脱敏、高风险召回和缺信息召回均为 1.000。该结果来自确定性策略用例，必须与 RAGCare、RAGAS、MIRAGE 等医学检索/生成评测分开表述。
+本地运行结果为全部通过：Action、Evidence State、证据源、患者工具、隐私脱敏、高风险召回和缺信息召回均命中预期。该结果来自确定性策略用例，必须与 RAGCare、RAGAS、MIRAGE 等医学检索/生成评测分开表述。
 
 运行时 trace 也可单独聚合：
 

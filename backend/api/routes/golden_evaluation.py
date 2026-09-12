@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from backend.db.models import (
     GoldenEvaluationCase,
     GoldenEvaluationReview,
+    TenantMembership,
     User,
 )
 from backend.env import PROJECT_ROOT
@@ -23,6 +24,26 @@ from backend.schemas.golden import (
 )
 
 router = APIRouter(prefix="/evaluation/golden", tags=["golden-evaluation"])
+
+
+def _can_review_or_read_golden(db: Session, user: User) -> bool:
+    """Golden cases (including reference answers) are clinical data.
+
+    Platform admins and users holding an active clinician membership may read
+    them; plain users get 403 instead of the case content.
+    """
+    if user.role == "admin":
+        return True
+    return (
+        db.query(TenantMembership)
+        .filter(
+            TenantMembership.user_id == user.id,
+            TenantMembership.role == "clinician",
+            TenantMembership.status == "active",
+        )
+        .first()
+        is not None
+    )
 
 
 def _case_response(db: Session, item: GoldenEvaluationCase) -> GoldenCaseResponse:
@@ -90,9 +111,11 @@ async def list_golden_cases(
     dataset_version: str = Query(default="v1"),
     status: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if not _can_review_or_read_golden(db, current_user):
+        raise HTTPException(status_code=403, detail="Golden cases are restricted to clinical reviewers")
     query = db.query(GoldenEvaluationCase).filter(
         GoldenEvaluationCase.dataset_name == dataset_name,
         GoldenEvaluationCase.dataset_version == dataset_version,

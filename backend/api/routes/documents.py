@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -36,6 +37,7 @@ from backend.schemas import (
 )
 
 router = APIRouter(tags=["documents"])
+logger = logging.getLogger("healthtrace.documents")
 incremental_indexer = IncrementalDocumentIndexer(
     milvus_manager,
     milvus_writer,
@@ -353,7 +355,8 @@ async def list_documents(_: User = Depends(require_admin)):
         documents = [DocumentInfo(**stats) for stats in file_stats.values()]
         return DocumentListResponse(documents=documents)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list documents: {str(e)}")
+        logger.warning("list documents failed: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=500, detail="Failed to list documents")
 
 
 @router.get(
@@ -434,9 +437,10 @@ async def rollback_document_version(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
+        logger.warning("document rollback failed: %s: %s", type(exc).__name__, exc)
         raise HTTPException(
             status_code=500,
-            detail=f"Document rollback failed; active version retained: {exc}",
+            detail="Document rollback failed; active version retained",
         ) from exc
     return DocumentRollbackResponse(
         filename=record.filename,
@@ -468,7 +472,8 @@ async def upload_document_async(
         upload_job_manager.complete_step(job["job_id"], "upload", "File uploaded, waiting for background processing")
     except Exception as e:
         upload_job_manager.fail_job(job["job_id"], "upload", f"File save failed: {e}")
-        raise HTTPException(status_code=500, detail=f"File save failed: {e}")
+        logger.warning("public upload save failed: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=500, detail="File save failed")
 
     durable_job, _ = enqueue_job(
         db,
@@ -595,7 +600,8 @@ async def upload_document(
                 created_by_user_id=current_user.id,
             )
         except Exception as doc_err:
-            raise HTTPException(status_code=500, detail=f"Document processing failed: {doc_err}")
+            logger.warning("document processing failed: %s: %s", type(doc_err).__name__, doc_err)
+            raise HTTPException(status_code=500, detail="Document processing failed")
 
         return DocumentUploadResponse(
             filename=filename,
@@ -613,7 +619,8 @@ async def upload_document(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Document upload failed: {str(e)}")
+        logger.warning("document upload failed: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=500, detail="Document upload failed")
 
 
 @router.delete("/documents/{filename}", response_model=DocumentDeleteResponse)
@@ -627,4 +634,5 @@ async def delete_document(filename: str, _: User = Depends(require_admin)):
             message=f"Deleted vector data for {filename}; local file is retained",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Document delete failed: {str(e)}")
+        logger.warning("document delete failed: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=500, detail="Document delete failed")

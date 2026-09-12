@@ -7,16 +7,27 @@ from backend.patient.scope import PatientScope
 _SAFE_SCOPE_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 
 
-def patient_scope_filter(scope: PatientScope, chunk_level: int = 3) -> str:
+def patient_scope_predicate(scope: PatientScope) -> str:
+    """The tenant/patient isolation clause, without any chunk-level term.
+
+    Every query that reads ``healthtrace_patient_record_text_v1`` must carry this
+    clause: the collection holds every tenant's documents, so a query built from
+    its other terms alone reaches across patients. Split out from
+    ``patient_scope_filter`` (rather than retyped at each call site) so that
+    clause exists once and a new caller imports it instead of reproducing it.
+    """
     for value in (scope.tenant_id, scope.patient_id):
         if not _SAFE_SCOPE_ID.fullmatch(value):
             raise ValueError("Invalid patient scope identifier")
     return (
         f'document_domain == "patient_private" and '
         f'tenant_id == "{scope.tenant_id}" and '
-        f'patient_id == "{scope.patient_id}" and '
-        f"chunk_level == {int(chunk_level)}"
+        f'patient_id == "{scope.patient_id}"'
     )
+
+
+def patient_scope_filter(scope: PatientScope, chunk_level: int = 3) -> str:
+    return f'{patient_scope_predicate(scope)} and chunk_level == {int(chunk_level)}'
 
 
 def retrieve_patient_records(

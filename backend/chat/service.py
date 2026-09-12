@@ -317,13 +317,16 @@ def chat_with_agent(
                 )
         except Exception as exc:
             print(f"Agent invocation fallback activated: {exc!r}")
-            fallback_error = str(exc)
+            # The trace is streamed to the browser and persisted with the
+            # message; keep only the exception type there. Full details stay
+            # in server logs.
+            fallback_error = type(exc).__name__
             result = {
                 "output": _safe_degraded_medical_response(
                     redacted_user_text,
                     _friendly_model_error(exc),
                 ),
-                "fallback_error": str(exc),
+                "fallback_error": type(exc).__name__,
             }
 
     response_content = ""

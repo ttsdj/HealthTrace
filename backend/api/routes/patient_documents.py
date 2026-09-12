@@ -23,9 +23,9 @@ from backend.patient.documents import (
     is_within_private_root,
     patient_document_path,
     require_patient_domains_enabled,
-    safe_upload_filename,
     save_patient_upload,
     scope_document_chunks,
+    validate_patient_upload,
 )
 from backend.patient.retrieval import retrieve_patient_records
 from backend.patient.scope import (
@@ -369,7 +369,7 @@ async def rollback_patient_document_version(
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Patient document rollback failed; active version retained: {exc}",
+            detail="Patient document rollback failed; active version retained",
         ) from exc
     return DocumentRollbackResponse(
         filename=record.filename,
@@ -385,7 +385,7 @@ async def upload_patient_document(
     db: Session = Depends(get_db),
 ):
     require_patient_domains_enabled()
-    filename = safe_upload_filename(file.filename or "")
+    filename = validate_patient_upload(file.filename or "")
     document_id = f"doc-{uuid4()}"
     path = patient_document_path(DATA_DIR / "documents", scope, document_id, filename)
     file_type = Path(filename).suffix.lstrip(".").upper()
@@ -441,12 +441,18 @@ async def upload_patient_document(
             leaf_chunks=len(leaf_docs),
             status=record.status,
         )
+    except HTTPException:
+        record.status = "failed"
+        record.error_message = "upload rejected"
+        record.updated_at = datetime.utcnow()
+        db.commit()
+        raise
     except Exception as exc:
         record.status = "failed"
         record.error_message = str(exc)[:2000]
         record.updated_at = datetime.utcnow()
         db.commit()
-        raise HTTPException(status_code=500, detail=f"Patient document processing failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Patient document processing failed") from exc
 
 
 @router.post(
@@ -459,7 +465,7 @@ async def upload_patient_document_async(
     db: Session = Depends(get_db),
 ):
     require_patient_domains_enabled()
-    filename = safe_upload_filename(file.filename or "")
+    filename = validate_patient_upload(file.filename or "")
     document_id = f"doc-{uuid4()}"
     path = patient_document_path(DATA_DIR / "documents", scope, document_id, filename)
     record = DocumentRecord(
@@ -517,9 +523,12 @@ async def upload_patient_document_async(
             filename=filename,
             status="queued",
         )
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Patient file save failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Patient file save failed") from exc
 
 
 @router.put(
@@ -538,7 +547,7 @@ async def update_patient_document(
     if record is None:
         raise HTTPException(status_code=404, detail="Patient document not found")
 
-    filename = safe_upload_filename(file.filename or record.filename)
+    filename = validate_patient_upload(file.filename or record.filename)
     canonical_path = patient_document_path(
         DATA_DIR / "documents",
         scope,
@@ -576,7 +585,7 @@ async def update_patient_document(
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Patient document update failed; prior version retained: {exc}",
+            detail="Patient document update failed; prior version retained",
         ) from exc
 
 
@@ -596,7 +605,7 @@ async def update_patient_document_async(
     if record is None:
         raise HTTPException(status_code=404, detail="Patient document not found")
 
-    filename = safe_upload_filename(file.filename or record.filename)
+    filename = validate_patient_upload(file.filename or record.filename)
     canonical_path = patient_document_path(
         DATA_DIR / "documents",
         scope,

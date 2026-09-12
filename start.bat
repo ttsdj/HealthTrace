@@ -15,6 +15,19 @@ if exist "%ROOT%.env" (
     )
 )
 
+rem Ports are interpolated into spawned command lines below; only plain digits
+rem are accepted so a crafted .env value cannot become a command separator.
+echo %BACKEND_PORT%|findstr /r "^[0-9][0-9]*$" >nul
+if errorlevel 1 (
+    echo [WARN] HEALTHTRACE_BACKEND_PORT is not numeric; falling back to 8000.
+    set "BACKEND_PORT=8000"
+)
+echo %FRONTEND_PORT%|findstr /r "^[0-9][0-9]*$" >nul
+if errorlevel 1 (
+    echo [WARN] HEALTHTRACE_FRONTEND_PORT is not numeric; falling back to 3000.
+    set "FRONTEND_PORT=3000"
+)
+
 echo ============================================
 echo   HealthTrace - One Command Startup
 echo   Infrastructure mode: %INFRA_MODE%

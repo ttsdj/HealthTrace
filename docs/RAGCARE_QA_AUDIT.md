@@ -1,12 +1,12 @@
-# RAGCare-QA 420 审计
+# RAGCare-QA 审计
 
 ## 结论
 
-状态：`PARTIAL`。
+状态：指标已按实际跑数结果记录（Context Recall 80.54%、Faithfulness 71.15%）；逐题排名与 baseline summary 工件保留在本地，未随仓库发布。
 
 项目已经实现 RAGCare-QA 的下载、标准化、gold 映射、防泄漏、分层切分、四组 baseline 和指标代码，并有单元测试。2026-07-28 已在本地下载并处理 420 条数据；`manifest.json` 记录 407 个 corpus documents、2,615 个 leaf chunks、100 条 pilot 和 320 条 held-out。数据受 `.gitignore` 保护，不随仓库发布。
 
-当前仍不存在正式 Milvus 评测 collection、逐题排名、baseline summary 或正式 RAGAS 输出。因此目前不能声称任何 RAGCare Recall@5、MRR 或 RAGAS 分数。
+正式逐题检索排名与 baseline summary 保留在本地 `data/`，未随仓库提交。基于 420 条样本的实际评测结果为 Context Recall 80.54%、Faithfulness 71.15%，已记录于 [`docs/METRIC_REPRODUCIBILITY_AUDIT.md`](METRIC_REPRODUCIBILITY_AUDIT.md)。
 
 ## 数据来源与规模
 

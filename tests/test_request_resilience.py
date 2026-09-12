@@ -33,6 +33,10 @@ def test_audited_request_reuses_one_session_for_dependency_and_audit(tmp_path, m
             "type": "http",
             "method": "GET",
             "path": "/auth/me",
+            # The router sets this for a matched route, and the middleware only
+            # audits matched routes: an unmatched path reached no endpoint, so
+            # there is no authorization decision to record.
+            "route": SimpleNamespace(path="/auth/me"),
             "headers": [],
             "app": app,
         }

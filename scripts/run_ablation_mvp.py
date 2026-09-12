@@ -1,7 +1,7 @@
 """Run a small HealthTrace ablation suite for reproducible evidence.
 
 The runner intentionally focuses on fast MVP evidence:
-- reuse the finished dense/BM25/hybrid 420-case retrieval benchmark;
+- reuse the finished dense/BM25/hybrid retrieval benchmark;
 - run query rewrite on/off against the real RAGCare Milvus index;
 - compare serial multi-query retrieval with LangGraph Send fanout;
 - estimate streaming delivery benefit with an explicit delivery-layer probe;
@@ -653,7 +653,7 @@ def write_report(output_dir: Path, payload: dict) -> None:
             "",
             "## Resume-Safe Wording",
             "",
-            "- Built an ablation runner for HealthTrace over a 30-case RAGCare MVP subset plus the existing 420-case retrieval benchmark.",
+            "- Built an ablation runner for HealthTrace over a RAGCare MVP subset plus the existing retrieval benchmark.",
             "- Compared query rewrite on/off, serial decomposition vs LangGraph Send fanout, evidence compression, SSE delivery behavior, and medical safety guardrails.",
             "- Reported deterministic Recall@5/MRR and latency metrics without mixing retrieval quality with streaming UX claims.",
         ]

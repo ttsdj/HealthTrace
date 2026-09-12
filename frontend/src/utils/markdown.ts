@@ -1,3 +1,4 @@
+import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
@@ -35,7 +36,11 @@ marked.use({
 });
 
 export function parseMarkdown(text: string, msgIndex?: number | null): string {
-  const html = marked.parse(text || '', { async: false }) as string;
+  const rendered = marked.parse(text || '', { async: false }) as string;
+  // LLM answers can echo raw HTML from ingested documents (stored-XSS sink:
+  // the result goes into v-html). Sanitize before the citation post-processor,
+  // which only injects <sup> tags carrying digit-validated attributes.
+  const html = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
 
   if (msgIndex === undefined || msgIndex === null) {
     return html;

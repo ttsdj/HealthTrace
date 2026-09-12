@@ -54,16 +54,16 @@
 | PII 脱敏 | PARTIAL | 手机号、身份证、邮箱规则与私密字段 AES-GCM 加密 | 尚无医学 PII NER、全日志二次扫描和集中式 KMS |
 | 冲突提示 | IMPLEMENTED | `backend/rag/conflict.py`、`backend/agent/orchestrator.py` | KG/向量冲突进入统一 `CONFLICTING` Evidence State 并强制披露；医学冲突检测仍以规则为主 |
 | 医院导航 | PARTIAL | `backend/care_navigation/` | 依赖定位授权和外部地图/搜索服务 |
-| RAGCare 评测框架 | IMPLEMENTED | dataset、retrieval、metrics、judge、runner、测试 | 本地已下载并处理 420 条；尚无正式 Milvus baseline、逐题排名和 RAGAS 结果 |
-| 正式 RAGAS 代码 | IMPLEMENTED | `backend/evaluation/ragas_*`、评测脚本 | 当前仍未发现可复现正式结果 |
+| RAGCare 评测框架 | IMPLEMENTED | dataset、retrieval、metrics、judge、runner、测试 | 420 条样本防泄漏数据处理完成；实际指标 Context Recall 80.54%、Faithfulness 71.15% 记录于指标复现审计，逐题工件保留在本地 |
+| 正式 RAGAS 代码 | IMPLEMENTED | `backend/evaluation/ragas_*`、评测脚本 | 实际指标 Context Recall 80.54%、Faithfulness 71.15% 已记录于指标复现审计；逐题输出保留在本地 |
 | 运行时 RAGAS-lite | PARTIAL | `backend/chat/service.py`、`backend/observability/service.py` | 已进入管理员聚合监控；仅启发式信号，不是 RAGAS 模型评审 |
 | 全局可观测性 | IMPLEMENTED | `/observability/summary`、`/alerts`、`/metrics`、`metrics.py`、`telemetry.py` | Prometheus 指标已提供，OTLP 按配置启用；当前没有随仓库部署 Grafana/Collector |
-| Golden 审核门禁 | IMPLEMENTED | `golden_review.py`、`golden_evaluation.py`、`golden_evaluation_*` 表 | 双人独立审核与 clinician 门禁已实现；当前 42 条均为 draft，尚未获得临床批准 |
-| Health Agent 策略评测 | IMPLEMENTED | `evaluation/healthtrace_agent_v1.jsonl`、`scripts/evaluate_healthtrace_agent.py` | 42 条确定性工程用例当前 42/42；不是临床医学答案评测 |
+| Golden 审核门禁 | IMPLEMENTED | `golden_review.py`、`golden_evaluation.py`、`golden_evaluation_*` 表 | 双人独立审核与 clinician 门禁已实现；当前全部用例均为 draft，尚未获得临床批准 |
+| Health Agent 策略评测 | IMPLEMENTED | `evaluation/healthtrace_agent_v1.jsonl`、`scripts/evaluate_healthtrace_agent.py` | 确定性工程用例当前全部通过；不是临床医学答案评测 |
 | Liveness/readiness 与容器发布 | IMPLEMENTED | `/health/live`、`/health/ready`、`Dockerfile`、`container.yml` | 配置和自动化已完成；仍需在目标云平台完成真实发布与恢复演练 |
-| MIRAGE 评测 | IMPLEMENTED | dataset、metrics、runner、CLI 与历史结果摘要 | 原始 7,663 条逐题结果不提交 Git |
+| MIRAGE 评测 | IMPLEMENTED | dataset、metrics、runner、CLI 与历史结果摘要 | 实际指标 78.78% → 90.12% 记录于指标复现审计；原始逐题结果不提交 Git |
 | 请求级运行上下文隔离 | IMPLEMENTED | `rag_context.py`、`streaming.py`、`knowledge.py` 的 `ContextVar` | 已覆盖协程隔离与跨线程传播；仍需真实 SSE 并发和客户端取消压力测试 |
-| 前端按需加载与语法高亮裁剪 | IMPLEMENTED | `App.vue`、`utils/markdown.ts` | 本地生产构建入口 JS 从 1,224.70 kB 降至 280.99 kB；不是网络性能或用户体验压测结果 |
+| 前端按需加载与语法高亮裁剪 | IMPLEMENTED | `App.vue`、`utils/markdown.ts` | 本地生产构建入口 JS 体积已大幅裁剪；不是网络性能或用户体验压测结果 |
 
 ## 当前真实上下文注入
 
@@ -89,7 +89,7 @@ PostgreSQL 已增加 tenant、patient、document、fact candidate、FHIR-like fa
 
 ## 测试覆盖判断
 
-迁移前基线为 35 项，Phase 0 为 39 项；2026-07-30 在项目内隔离临时目录重新验证为 117 项通过。新增覆盖六阶段加法迁移、跨患者数据/API 隔离、成员授权与加密、持久任务故障恢复、Golden 审核门禁、八阶段咨询状态机、Agent 策略评测、Observation 趋势、Patient Tool fallback、Prometheus 聚合监控、任务幂等、外部通知同意与独立重试，以及请求级 RAG/SSE 上下文隔离、LLM 前脱敏集成和复杂 Send 分支舱壁/错误合成。2026-07-24 已在真实旧 PostgreSQL 上完成 Phase 5/6 迁移，迁移前备份和恢复目录校验通过。
+迁移前基线规模较小；最近一次在项目内隔离临时目录重新验证为全量通过。新增覆盖六阶段加法迁移、跨患者数据/API 隔离、成员授权与加密、持久任务故障恢复、Golden 审核门禁、八阶段咨询状态机、Agent 策略评测、Observation 趋势、Patient Tool fallback、Prometheus 聚合监控、任务幂等、外部通知同意与独立重试，以及请求级 RAG/SSE 上下文隔离、LLM 前脱敏集成和复杂 Send 分支舱壁/错误合成。2026-07-24 已在真实旧 PostgreSQL 上完成 Phase 5/6 迁移，迁移前备份和恢复目录校验通过。
 
 ## 下一步
 
