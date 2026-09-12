@@ -246,7 +246,8 @@ async def create_sensitive_record(
     try:
         ciphertext, key_id = encrypt_json(request.payload, aad=aad)
     except EncryptionConfigurationError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        # Do not echo key-configuration details to a patient-scope caller.
+        raise HTTPException(status_code=503, detail="field encryption is not available") from exc
     record = PatientSensitiveRecord(
         id=record_id,
         tenant_id=scope.tenant_id,
@@ -278,7 +279,7 @@ async def list_sensitive_records(
     try:
         return [_sensitive_response(item) for item in rows]
     except EncryptionConfigurationError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="field encryption is not available") from exc
 
 
 @router.delete("/patient/sensitive-records/{record_id}")

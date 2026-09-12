@@ -1,13 +1,16 @@
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.schemas.care_navigation import RequestLocation
 
 
 class ChatRequest(BaseModel):
-    message: str
-    session_id: Optional[str] = "default_session"
+    # Messages are embedded into LLM prompts and persisted to PostgreSQL and
+    # Redis; the cap matches the patient search bound in spirit and keeps a
+    # single request from carrying unbounded payloads.
+    message: str = Field(max_length=12000)
+    session_id: Optional[str] = Field(default="default_session", max_length=120)
     location: Optional[RequestLocation] = None
 
 

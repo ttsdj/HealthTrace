@@ -11,12 +11,18 @@ class ConversationStorage:
     """对话存储（PostgreSQL + Redis）。"""
 
     @staticmethod
-    def _messages_cache_key(user_id: str, session_id: str) -> str:
-        return f"chat_messages:{user_id}:{session_id}"
+    def _safe_user_part(user_id: str) -> str:
+        # Cache keys join parts with ':'; escape separators so one user's
+        # username can never collide with another user's (user, session) pair.
+        return (user_id or "").replace(":", "%3A").replace(" ", "_")
 
-    @staticmethod
-    def _sessions_cache_key(user_id: str) -> str:
-        return f"chat_sessions:{user_id}"
+    @classmethod
+    def _messages_cache_key(cls, user_id: str, session_id: str) -> str:
+        return f"chat_messages:{cls._safe_user_part(user_id)}:{cls._safe_user_part(session_id)}"
+
+    @classmethod
+    def _sessions_cache_key(cls, user_id: str) -> str:
+        return f"chat_sessions:{cls._safe_user_part(user_id)}"
 
     @staticmethod
     def _utc_now() -> datetime:

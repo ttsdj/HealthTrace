@@ -8,8 +8,8 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/healthtrace
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+psycopg2://postgres:${POSTGRES_PASSWORD:-healthtrace-local-dev}@postgres:5432/healthtrace
+      REDIS_URL: redis://:${REDIS_PASSWORD:-healthtrace-local-dev}@redis:6379/0
       MILVUS_HOST: standalone
       MILVUS_PORT: "19530"
       HEALTHTRACE_INFRA_MODE: managed

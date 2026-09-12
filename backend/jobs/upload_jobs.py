@@ -40,9 +40,38 @@ def _now_iso() -> str:
 class UploadJobManager:
     """Thread-safe in-memory job state container."""
 
+    # Terminal jobs are evicted after this window so the in-process registry
+    # cannot grow without bound on a long-running worker.
+    TERMINAL_JOB_TTL_SECONDS = 3600
+    MAX_JOBS = 1000
+
     def __init__(self):
         self._jobs: dict[str, dict] = {}
         self._lock = Lock()
+
+    def _prune_locked(self) -> None:
+        now = datetime.now(UTC)
+        terminal = {"completed", "failed"}
+        expired = []
+        for job_id, job in self._jobs.items():
+            if job.get("status") not in terminal:
+                continue
+            try:
+                age = (now - datetime.fromisoformat(job.get("updated_at", ""))).total_seconds()
+            except ValueError:
+                age = self.TERMINAL_JOB_TTL_SECONDS + 1
+            if age > self.TERMINAL_JOB_TTL_SECONDS:
+                expired.append(job_id)
+        for job_id in expired:
+            self._jobs.pop(job_id, None)
+        if len(self._jobs) <= self.MAX_JOBS:
+            return
+        removable = sorted(
+            (job_id for job_id, job in self._jobs.items() if job.get("status") in terminal),
+            key=lambda job_id: self._jobs[job_id].get("updated_at", ""),
+        )
+        for job_id in removable[: len(self._jobs) - self.MAX_JOBS]:
+            self._jobs.pop(job_id, None)
 
     def create_job(
         self,
@@ -80,6 +109,7 @@ class UploadJobManager:
             ],
         }
         with self._lock:
+            self._prune_locked()
             self._jobs[job_id] = job
             return deepcopy(job)
 
@@ -161,6 +191,7 @@ class UploadJobManager:
 
     def list_jobs(self) -> list[dict]:
         with self._lock:
+            self._prune_locked()
             return [deepcopy(job) for job in self._jobs.values()]
 
     @staticmethod

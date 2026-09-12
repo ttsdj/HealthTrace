@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Optional
 
@@ -7,6 +8,8 @@ try:
     from langchain_core.tools import tool
 except ImportError:
     from langchain_core.tools import tool
+
+logger = logging.getLogger("healthtrace.tools.weather")
 
 AMAP_WEATHER_API = os.getenv("AMAP_WEATHER_API")
 AMAP_API_KEY = os.getenv("AMAP_API_KEY")
@@ -68,9 +71,14 @@ def get_current_weather(location: str, extensions: Optional[str] = "base") -> st
     except requests.exceptions.Timeout:
         return "错误：请求天气服务超时"
     except requests.exceptions.RequestException as e:
-        return f"错误：天气服务请求失败 - {e}"
+        # requests exception text embeds the full request URL including the
+        # API key query parameter; log it server-side and return a generic
+        # message so the key never reaches tool output or conversation logs.
+        logger.warning("weather request failed: %s: %s", type(e).__name__, e)
+        return "错误：天气服务请求失败，请稍后重试"
     except Exception as e:
-        return f"错误：解析天气数据失败 - {e}"
+        logger.warning("weather response parse failed: %s: %s", type(e).__name__, e)
+        return "错误：解析天气数据失败"
 
 
 @tool("get_current_weather")

@@ -2,10 +2,11 @@ import os
 import socket
 from urllib.parse import urlparse
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from backend.infra.auth import require_admin
 from backend.infra.database import SessionLocal
 from backend.infra.cache import cache
 from backend.indexing.milvus_client import COLLECTION_ENV_BY_KIND, get_milvus_store
@@ -187,8 +188,41 @@ def _patient_capabilities() -> dict:
     }
 
 
+def _summarize_services(services: dict) -> dict:
+    """Reduce per-service diagnostics to a boolean for unauthenticated callers.
+
+    Error strings in the check results embed host:port targets and raw
+    exception text; the full detail stays behind the admin-only endpoint.
+    """
+    return {name: {"ok": bool(payload.get("ok"))} for name, payload in services.items()}
+
+
 @router.get("/health")
 async def health():
+    core_services = {
+        "postgres": _check_postgres(),
+        "redis": _check_redis(),
+        "milvus": _check_milvus(),
+        "llm": _check_llm_config(),
+    }
+    optional_services = {
+        "neo4j": _check_neo4j(),
+    }
+    ready = all(item.get("ok") for item in core_services.values())
+    return {
+        "service": "HealthTrace",
+        "infra_mode": os.getenv("HEALTHTRACE_INFRA_MODE", "managed").lower(),
+        "ready": ready,
+        "strict_startup": os.getenv("STRICT_STARTUP", "false").lower() == "true",
+        "services": {**_summarize_services(core_services), **_summarize_services(optional_services)},
+        "core_services": _summarize_services(core_services),
+        "optional_services": _summarize_services(optional_services),
+    }
+
+
+@router.get("/health/detail")
+async def health_detail(_: object = Depends(require_admin)):
+    """Full diagnostics (hosts, collection state, capabilities) for admins only."""
     core_services = {
         "postgres": _check_postgres(),
         "redis": _check_redis(),

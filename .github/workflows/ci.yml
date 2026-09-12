@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# PR-supplied code runs on the runner during tests/build; keep the default
+# GITHUB_TOKEN read-only so no workflow step can mutate repository state.
+permissions:
+  contents: read
+
 jobs:
   test-and-build:
     runs-on: ubuntu-latest

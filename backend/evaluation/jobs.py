@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +14,10 @@ from backend.evaluation.healthtrace_agent import (
 from backend.jobs.queue import JobReporter
 from backend.patient.planner import plan_patient_tool_calls
 
+# output_id becomes a filesystem path segment; keep it to a safe charset so a
+# crafted id cannot traverse out of the evaluation report directory.
+_SAFE_OUTPUT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+
 
 def run_agent_evaluation_job(job_id: str, payload: dict) -> dict:
     reporter = JobReporter(job_id)
@@ -25,7 +30,16 @@ def run_agent_evaluation_job(job_id: str, payload: dict) -> dict:
         raise ValueError("Evaluation cases must be inside the evaluation directory") from exc
     cases = load_agent_cases(case_path)
     output_id = str(payload.get("output_id") or datetime.now().strftime("%Y%m%d-%H%M%S"))
+    if not _SAFE_OUTPUT_ID.fullmatch(output_id):
+        raise ValueError(
+            "output_id may only contain letters, digits, dot, dash and underscore"
+        )
     output_dir = PROJECT_ROOT / "data" / "evaluations" / "healthtrace_agent" / output_id
+    resolved_output = output_dir.resolve()
+    try:
+        resolved_output.relative_to((PROJECT_ROOT / "data" / "evaluations").resolve())
+    except ValueError as exc:
+        raise ValueError("Evaluation output directory escapes the evaluations directory") from exc
     rows = []
     total = len(cases)
     for index, case in enumerate(cases, 1):

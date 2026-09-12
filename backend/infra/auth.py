@@ -3,12 +3,14 @@ import base64
 import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+import jwt as pyjwt
 from sqlalchemy.orm import Session
 
+from backend.infra.cache import cache
 from backend.infra.database import SessionLocal
 from backend.db.models import User
 
@@ -142,12 +144,56 @@ def create_access_token(username: str, role: str) -> str:
         "sub": username,
         "role": role,
         "exp": expire,
+        # jti enables server-side revocation (see revoke_access_token); tokens
+        # minted before this field existed simply skip the denylist check.
+        "jti": uuid4().hex,
     }
     try:
         secret = jwt_secret_key()
     except JWTConfigurationError as exc:
         raise _auth_not_configured() from exc
-    return jwt.encode(payload, secret, algorithm=ALGORITHM)
+    return pyjwt.encode(payload, secret, algorithm=ALGORITHM)
+
+
+def _denylist_key(jti: str) -> str:
+    return f"jwt_denylist:{jti}"
+
+
+def token_is_revoked(jti: str | None) -> bool:
+    """Best-effort denylist lookup.
+
+    Redis is an optional enhancement for this deployment (cache-aside degrades
+    gracefully), so a cache outage must not lock every user out: the check
+    fails open, and `cache.get_json` already swallows connection errors.
+    """
+    if not jti:
+        return False
+    return cache.get_json(_denylist_key(jti)) is not None
+
+
+def revoke_access_token(token: str) -> bool:
+    """Server-side logout: denylist the token's jti until natural expiry.
+
+    Tokens without a jti (issued before revocation existed) cannot be
+    individually revoked and return False.
+    """
+    try:
+        secret = jwt_secret_key()
+    except JWTConfigurationError:
+        return False
+    try:
+        payload = pyjwt.decode(token, secret, algorithms=[ALGORITHM])
+    except pyjwt.PyJWTError:
+        return False
+    jti = payload.get("jti")
+    if not jti:
+        return False
+    exp = payload.get("exp")
+    remaining_seconds = 60
+    if isinstance(exp, (int, float)):
+        remaining_seconds = max(60, int(exp - datetime.now(timezone.utc).timestamp()))
+    cache.set_json(_denylist_key(jti), {"revoked": True}, ttl=remaining_seconds)
+    return True
 
 
 def authenticate_user(db: Session, username: str, password: str) -> User | None:
@@ -175,11 +221,13 @@ def get_current_user(
         raise _auth_not_configured() from exc
 
     try:
-        payload = jwt.decode(token, secret, algorithms=[ALGORITHM])
+        payload = pyjwt.decode(token, secret, algorithms=[ALGORITHM])
         username = payload.get("sub")
         if not username:
             raise credentials_exception
-    except JWTError:
+        if token_is_revoked(payload.get("jti")):
+            raise credentials_exception
+    except pyjwt.PyJWTError:
         raise credentials_exception
 
     user = db.query(User).filter(User.username == username).first()
@@ -199,6 +247,6 @@ def resolve_role(requested_role: str | None, admin_code: str | None) -> str:
     role = (requested_role or "user").strip().lower()
     if role != "admin":
         return "user"
-    if ADMIN_INVITE_CODE and admin_code == ADMIN_INVITE_CODE:
+    if ADMIN_INVITE_CODE and hmac.compare_digest(admin_code or "", ADMIN_INVITE_CODE):
         return "admin"
     raise HTTPException(status_code=403, detail="管理员邀请码错误")

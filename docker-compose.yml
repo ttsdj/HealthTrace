@@ -5,9 +5,13 @@ services:
     environment:
       POSTGRES_DB: healthtrace
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      # Credential comes from .env; the default only covers a fresh volume on
+      # a developer machine. Every data-service port is bound to 127.0.0.1 so
+      # none of them is reachable from other hosts even if the password is
+      # weak. Change POSTGRES_PASSWORD for any shared or remote deployment.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-healthtrace-local-dev}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/postgres:/var/lib/postgresql/data
     healthcheck:
@@ -19,13 +23,13 @@ services:
   redis:
     container_name: healthtrace-redis
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-healthtrace-local-dev}"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD:-healthtrace-local-dev}' ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -51,11 +55,11 @@ services:
     container_name: healthtrace-milvus-minio
     image: minio/minio:RELEASE.2024-05-28T17-19-04Z
     environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-healthtrace-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-healthtrace-local-minio}
     ports:
-      - "9001:9001"
-      - "9000:9000"
+      - "127.0.0.1:9001:9001"
+      - "127.0.0.1:9000:9000"
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
     command: minio server /minio_data --console-address ":9001"
@@ -75,6 +79,8 @@ services:
       MINIO_REGION: us-east-1
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
+      MINIO_ACCESSKEYID: ${MINIO_ROOT_USER:-healthtrace-minio}
+      MINIO_SECRETACCESSKEY: ${MINIO_ROOT_PASSWORD:-healthtrace-local-minio}
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
     healthcheck:
@@ -84,22 +90,24 @@ services:
       timeout: 20s
       retries: 3
     ports:
-      - "19530:19530"
-      - "9091:9091"
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:9091:9091"
     depends_on:
       - "etcd"
   attu:
     container_name: healthtrace-milvus-attu
-    image: zilliz/attu:v2.5.11  
+    image: zilliz/attu:v2.5.11
     environment:
-      - MILVUS_URL=standalone:19530  
+      - MILVUS_URL=standalone:19530
       - PORT=3000
     ports:
-      - "8080:3000"
+      # Attu has no authentication of its own; keep the console on the
+      # loopback interface only.
+      - "127.0.0.1:8080:3000"
     depends_on:
       - standalone
     networks:
-      - default  
+      - default
 
 networks:
   default:

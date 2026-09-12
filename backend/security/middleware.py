@@ -23,7 +23,17 @@ _AUDITED_PREFIXES = (
     "/evaluation",
     "/tenant",
     "/audit",
+    "/jobs",
+    "/collections",
+    "/admin",
+    "/care-navigation",
+    "/observability",
 )
+
+# Prometheus scrapes /observability/metrics on a fixed interval with the admin
+# token; auditing every scrape would flood audit_events with no added
+# accountability, so this one high-frequency read stays metrics-only.
+_AUDIT_EXCLUDED = {("GET", "/observability/metrics")}
 
 
 def _resource_type(path: str) -> str:
@@ -75,7 +85,10 @@ async def audit_request_middleware(request: Request, call_next):
     status_code = 500
     error_type = ""
     path = request.url.path or "/"
-    audited = path.startswith(_AUDITED_PREFIXES)
+    audited = path.startswith(_AUDITED_PREFIXES) and (
+        request.method,
+        path,
+    ) not in _AUDIT_EXCLUDED
     bulkhead_acquired = False
     shared_db = None
 
