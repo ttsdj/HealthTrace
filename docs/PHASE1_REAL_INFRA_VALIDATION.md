@@ -36,11 +36,11 @@
 - PostgreSQL、Redis、Milvus 和 LLM 配置检查通过。
 - `phase1_migration=applied`，`patient_domains_enabled=true`。
 - Neo4j 当前端口不可达；系统将其报告为 optional service，不阻塞核心问答链路。
-- Python 自动化测试：66 passed。
+- Python 自动化测试：全部通过。
 - Vue/TypeScript 生产构建：通过。
 - 仓库密钥与大文件安全检查：通过。
-- 合成患者 HTML 使用本地 BGE-M3 完成真实上传、Hybrid 召回和聊天上下文注入；本人命中 2 条，另一患者命中 0 条。
-- 删除协调器同步删除 2 个叶向量、4 个父块和原文件；删除后患者 collection 可查询行数为 0。Milvus 物理统计在 compaction 前可能暂时保留 tombstone。
+- 合成患者 HTML 使用本地 BGE-M3 完成真实上传、Hybrid 召回和聊天上下文注入；仅本人命中，另一患者无命中。
+- 删除协调器同步删除对应叶向量、父块和原文件；删除后患者 collection 无可查询行数。Milvus 物理统计在 compaction 前可能暂时保留 tombstone。
 
 ## 仍未覆盖
 

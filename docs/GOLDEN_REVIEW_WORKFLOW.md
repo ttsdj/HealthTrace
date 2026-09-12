@@ -27,13 +27,13 @@ JSONL import
 
 ## 当前真实状态
 
-内置 `healthtrace_agent/v1` 共 42 条，已导入本地数据库：
+内置 `healthtrace_agent/v1` 用例已导入本地数据库：
 
-- draft：42
-- approved：0
+- draft：全部用例
+- approved：无
 - clinical claim allowed：false
 
-因此当前 `42/42` 只表示确定性工程策略测试通过，不代表临床答案准确率或临床安全认证。
+因此当前“策略用例全部通过”只表示确定性工程策略测试通过，不代表临床答案准确率或临床安全认证。
 
 ## 命令
 

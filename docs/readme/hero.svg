@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340"
+     role="img" aria-labelledby="ht-title ht-desc">
+  <title id="ht-title">HealthTrace — 个人健康档案管理与循证咨询</title>
+  <desc id="ht-desc">左侧是项目名称与一句话说明；右侧是一张咨询回答卡片，显示回答正文、两条来源引用、证据状态 SUFFICIENT 与执行 trace。</desc>
+
+  <rect width="1200" height="340" rx="26" fill="#f9f0d8"/>
+
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif">
+
+    <!-- ── title block ───────────────────────────────────────────── -->
+    <g id="title-block">
+      <text x="64" y="92" font-size="19" fill="#5a6a8f" letter-spacing="2">个人健康档案 · 循证咨询</text>
+      <text x="64" y="158" font-size="62" font-weight="700" fill="#1a1a1a">HealthTrace</text>
+      <text x="64" y="205" font-size="21" fill="#3a3a3a">公共医学知识与患者私有资料分域检索，</text>
+      <text x="64" y="236" font-size="21" fill="#3a3a3a">回答带来源引用与可回放 trace。</text>
+
+      <g id="stack" transform="translate(64 272)">
+        <rect width="98" height="32" rx="9" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.4"/>
+        <text x="49" y="21" font-size="16" fill="#1a1a1a" text-anchor="middle">FastAPI</text>
+        <g transform="translate(110 0)">
+          <rect width="124" height="32" rx="9" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.4"/>
+          <text x="62" y="21" font-size="16" fill="#1a1a1a" text-anchor="middle">LangGraph</text>
+        </g>
+        <g transform="translate(246 0)">
+          <rect width="86" height="32" rx="9" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.4"/>
+          <text x="43" y="21" font-size="16" fill="#1a1a1a" text-anchor="middle">Milvus</text>
+        </g>
+        <g transform="translate(344 0)">
+          <rect width="132" height="32" rx="9" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.4"/>
+          <text x="66" y="21" font-size="16" fill="#1a1a1a" text-anchor="middle">PostgreSQL</text>
+        </g>
+      </g>
+    </g>
+
+    <!-- ── proof: one answer, with its citations and evidence state ─ -->
+    <g id="proof-answer">
+      <rect x="680" y="44" width="456" height="252" rx="18" fill="#fffdf7" stroke="#1a1a1a" stroke-width="1.6"/>
+
+      <text x="708" y="84" font-size="18" fill="#5a6a8f" letter-spacing="1.6">咨询回答</text>
+      <line x1="708" y1="98" x2="1108" y2="98" stroke="#1a1a1a" stroke-opacity="0.16" stroke-width="1.4"/>
+
+      <text x="708" y="130" font-size="20" fill="#1a1a1a">建议先复查血压并连续记录 7 天，</text>
+      <text x="708" y="158" font-size="20" fill="#1a1a1a">再评估是否需要调整用药方案。</text>
+
+      <text x="708" y="194" font-size="16" fill="#5a6a8f" letter-spacing="1.4">来源</text>
+      <text x="708" y="220" font-size="18" fill="#3a3a3a">[1] 中国高血压防治指南 2024</text>
+      <text x="708" y="246" font-size="18" fill="#3a3a3a">[2] 患者体检报告 · p.3</text>
+
+      <g id="evidence" transform="translate(708 268)">
+        <rect width="122" height="26" rx="13" fill="#ffe28a"/>
+        <circle cx="15" cy="13" r="4.5" fill="#5a6a8f"/>
+        <text x="28" y="18" font-size="14" fill="#1a1a1a"
+              font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">SUFFICIENT</text>
+        <text x="136" y="18" font-size="15" fill="#5a6a8f">trace · 8 阶段 · 6 次工具调用</text>
+      </g>
+    </g>
+  </g>
+</svg>

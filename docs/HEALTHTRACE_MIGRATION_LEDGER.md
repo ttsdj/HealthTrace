@@ -61,10 +61,10 @@ HEALTHTRACE_INFRA_MODE=external
 - 新患者向量：独立 `healthtrace_patient_record_text_v1`，禁止回退公共 collection。
 - 新权威数据：FHIR-like facts、timeline、health tasks 和 task runs。
 - 回滚：迁移状态改为 `rolled_back` 并关闭功能开关，数据保留。
-- 验证：70 项测试通过，包含认证后的患者事实、时间轴、任务 HTTP 流程、患者检索降级和 Milvus flush。
+- 验证：后端测试全部通过，包含认证后的患者事实、时间轴、任务 HTTP 流程、患者检索降级和 Milvus flush。
 - 真实迁移：已在 `medretrieve_v2` PostgreSQL 执行加法迁移；用户和父块计数保持不变，旧父块全部标记为 `public_medical`。
 - Milvus：旧 collection 未重建；新增空的 `healthtrace_patient_record_text_v1`，包含 tenant/patient/domain/owner 隔离字段。
-- 患者链路：使用本地 BGE-M3 和无隐私合成文档验证上传、Hybrid 召回、聊天上下文注入、跨患者零泄漏及协调删除；测试结束后可查询残留为 0。
+- 患者链路：使用本地 BGE-M3 和无隐私合成文档验证上传、Hybrid 召回、聊天上下文注入、跨患者无泄漏及协调删除；测试结束后无可查询残留。
 - 运行验收：`/health` 返回 `ready=true`，PostgreSQL、Redis、Milvus、LLM 配置正常；Neo4j 当前未启动并按可选能力降级。
 - 详细记录：见 `docs/PHASE1_REAL_INFRA_VALIDATION.md`。
 
@@ -76,7 +76,7 @@ HEALTHTRACE_INFRA_MODE=external
 - 权威写入：候选经患者确认后才写入 `patient_facts` 并创建 `patient_timeline_events`。
 - 前端：新增患者资料、待确认、健康事实、时间轴、长期任务五个栏目，并在登录/登出时清空患者缓存。
 - 真实迁移：执行前已生成本地忽略的 PostgreSQL 备份；迁移只新增一张表，重复执行 `changes=[]`，旧表行数保持不变。
-- 端到端：本地 BGE-M3 合成病历完成上传、Hybrid 检索、跨患者零命中、规则候选、确认入档、时间轴和协调删除；测试记录残留为 0。
+- 端到端：本地 BGE-M3 合成病历完成上传、Hybrid 检索、跨患者无命中、规则候选、确认入档、时间轴和协调删除；测试记录无残留。
 - 视觉验证：桌面 1280×720 与移动 390×844 均无横向溢出，移动端保留新建对话和健康档案入口。
 
 ## 2026-07-22 Agent 与长期任务闭环
@@ -89,7 +89,7 @@ HEALTHTRACE_INFRA_MODE=external
 - 一致性：`health_task_runs(task_id, run_key)` 与通知 `dedup_key` 保证重复调度不会重复执行或重复通知；PostgreSQL 使用 `FOR UPDATE SKIP LOCKED` 领取任务。
 - 前端：健康任务页展示目标、通知、五类任务和运行记录，支持确认、取消、重试、补录与归档。
 - 真实迁移：已在 `medretrieve_v2` PostgreSQL 执行，只新增 11 个列、索引和 `health_notifications` 表，未删除旧数据。
-- 验证：后端 79 项测试通过，`npm run build` 通过；新增覆盖故障注入、跨患者通知隔离和 Phase 3 幂等迁移。
+- 验证：后端测试全部通过，`npm run build` 通过；新增覆盖故障注入、跨患者通知隔离和 Phase 3 幂等迁移。
 
 ## 2026-07-22 Agent 评测、趋势、可观测性与通知投递
 
@@ -97,10 +97,10 @@ HEALTHTRACE_INFRA_MODE=external
 - 迁移前备份：`data/backups/healthtrace-before-phase4-20260722.dump`，custom format，已通过 `pg_restore -l` 校验；SHA-256 为 `4EF26910595357D68DADA0CFE1DD025E3D7E7E2F854677B2E3F529E8E9FA1E21`。
 - 新表：`health_notification_deliveries`；没有删除、重命名或回填既有业务表。
 - Patient Tools：新增 Observation 趋势与白名单工具规划；默认规则模式，可选受约束 LLM，任何模型/解析失败回退规则。
-- Agent 评测：42 条人工规则策略集覆盖高风险、缺失信息、证据源、工具路由、隐私和边界，当前 42/42 通过；该结果不代表临床答案准确率。
+- Agent 评测：人工规则策略集覆盖高风险、缺失信息、证据源、工具路由、隐私和边界，当前全部通过；该结果不代表临床答案准确率。
 - 可观测性：管理员聚合查看证据状态、检索降级、工具成功率/延迟、任务重试和 ragas_lite 信号；接口不返回问题、回答和患者标识。
 - 外部通知：站内通知先提交，邮件/Webhook 后投递；显式同意、幂等、指数退避，外部失败不会回滚任务。
-- 验证：后端 90 项测试通过，前端 TypeScript/Vite 构建通过，桌面和 390×844 移动视口通过，真实 `/health` 为 `ready=true`；Neo4j 保持可选降级。
+- 验证：后端测试全部通过，前端 TypeScript/Vite 构建通过，桌面和移动视口通过，真实 `/health` 为 `ready=true`；Neo4j 保持可选降级。
 - 容器化：Compose 合并配置通过；应用镜像构建被本机 Docker 腾讯镜像源 EOF 阻塞，未发现 Dockerfile 语法错误，需修复 Docker Desktop registry mirror 后重试。
 
 ## 2026-07-24 权限、安全、持久任务与正式评测门禁
@@ -110,11 +110,11 @@ HEALTHTRACE_INFRA_MODE=external
 - Phase 5 新增：tenant 成员、患者授权、AES-256-GCM 私密记录和 metadata-only 审计表。
 - Phase 6 新增：PostgreSQL 持久后台任务、Golden case 和独立审核表。由于 Phase 5 启动时的 metadata 初始化已经创建当前模型表，Phase 6 在真实库登记为 applied 且 `changes=[]`；没有删除或改写已有业务数据。
 - 真实库迁移后计数：用户 10、tenant membership 10、patient grant 10、audit 0、background job 0、golden case 0。
-- 评测导入：随后导入 42 条 `healthtrace_agent/v1` 用例，全部为 draft、approved=0、clinical claim allowed=false；没有伪造临床审核。
+- 评测导入：随后导入 `healthtrace_agent/v1` 策略用例，全部为 draft、均未批准、clinical claim allowed=false；没有伪造临床审核。
 - 持久任务：公共文档上传/删除、患者文档索引和正式 Agent 评测进入数据库队列，支持并发领取、幂等键、短事务进度、stale recovery 和有限指数退避。
 - 可观测性：增加 Prometheus 文本指标、可选 OTLP、聚合告警、liveness/readiness 和通知诊断。
 - 部署：增加新机器 `setup.bat`、生产 preflight、部署 smoke、非 root 多阶段镜像以及 tag 触发的 GHCR 发布工作流。
-- 容器：默认 PyTorch CPU wheel，避免通用 API 镜像携带 CUDA 运行库；本地镜像由约 3.13 GB 降至约 586 MB（约 81%）。
+- 容器：默认 PyTorch CPU wheel，避免通用 API 镜像携带 CUDA 运行库；本地镜像体积大幅缩减。
 - 容器冒烟：临时应用容器在 external 模式连接既有 PostgreSQL、Redis 与 Milvus，`/health/live`、`/health/ready`、前端静态资源和 deployment smoke 全部通过；容器状态为 healthy。Neo4j 未启动并按 optional service 正常降级。
 - 网络说明：本机 Docker Desktop 的腾讯镜像源在 Docker Hub 元数据请求时返回 EOF；本地验收通过 Dockerfile 构建参数使用 AWS 公共仓库中的等价官方 Python/Node 镜像完成，默认配置未写死本机绕行地址。
-- 验证：后端 98 项测试通过，Python compileall、前端生产构建、仓库安全检查、生产 preflight、Compose 配置和真实容器冒烟通过。
+- 验证：后端测试全部通过，Python compileall、前端生产构建、仓库安全检查、生产 preflight、Compose 配置和真实容器冒烟通过。
